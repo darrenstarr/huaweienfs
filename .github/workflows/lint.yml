@@ -1,0 +1,72 @@
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck on scripts/
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          severity: warning
+          scandir: ./scripts
+        env:
+          SHELLCHECK_OPTS: -e SC1091
+
+  markdownlint:
+    name: markdownlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: |
+            README.md
+            LICENSE
+            docs/**/*.md
+          config: .markdownlint.json
+
+  make-help:
+    name: make help (Makefile syntax check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make help
+
+  secret-leak-guard:
+    name: secret-leak guard (no real IPs/MACs/passwords)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Grep tracked files for known-private patterns
+        run: |
+          # Same regex as the one CLAUDE.md asks the agent to run before
+          # commit. Excludes vendor/ (kernel sources), and the example
+          # placeholder values in docs that match the public placeholder
+          # set documented in README.md.
+          set -e
+          # Anything in 10.200.x or 10.27.x is a private LAN this dev's
+          # deployment uses; should never appear in tracked files.
+          # Exclude vendor/ (upstream sources) and this workflow file
+          # itself (which legitimately mentions the patterns it greps
+          # for).
+          if git ls-files \
+              | grep -v '^vendor/' \
+              | grep -v '^.github/workflows/lint.yml$' \
+              | xargs grep -nE \
+              '10\.200\.|10\.27\.|10\.2\.0\.4|/opt/data/vms|/mnt/ramdisk|Minions12345|52:54:00:e2:60:33|4c:00:82:f3:84:c1' \
+              2>/dev/null; then
+            echo "::error::Private deployment values found in tracked files. Move them to secrets/ (gitignored)."
+            exit 1
+          fi
+          echo "OK — no private deployment values found in tracked files."
