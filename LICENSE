@@ -1,0 +1,56 @@
+SPDX-License-Identifier: GPL-2.0-only
+
+This repository ships a mix of vendored upstream code and project-local
+glue. Each file's own SPDX header and copyright lines are authoritative;
+this file is an overview, not a license re-grant.
+
+----------------------------------------------------------------------
+Vendored upstream sources (vendor/openeuler/)
+----------------------------------------------------------------------
+
+Sourced verbatim from the OpenEuler kernel
+(https://gitee.com/openeuler/kernel, branch OLK-6.6).
+
+Two distinct copyright groups exist within vendor/openeuler/:
+
+  1. Files originally authored by Huawei for OpenEuler — every file
+     under vendor/openeuler/fs/nfs/enfs/, the
+     vendor/openeuler/fs/nfs/enfs_adapter.{c,h} pair, and the
+     sunrpc_enfs_adapter sources/header. These carry an explicit
+     "Copyright (c) Huawei Technologies Co., Ltd." line and are
+     licensed GPL-2.0-only.
+
+  2. Stock Linux kernel files that OpenEuler patches but that retain
+     their original kernel-author copyrights — fs/nfs/{super.c,
+     fs_context.c, nfs3xdr.c, internal.h, Kconfig, Makefile},
+     net/sunrpc/{clnt.c, xprt.c, Kconfig, Makefile} and several
+     headers under include/linux/. The named copyright holders are the
+     original Linux NFS / SunRPC subsystem contributors (Rick Sladkey,
+     David Howells, Olaf Kirch, and others — see each file). These are
+     GPL-2.0-only as inherited from the Linux kernel.
+
+Do not modify SPDX or copyright headers in any vendor/openeuler/ file.
+
+The pinned upstream commit is recorded in
+vendor/openeuler/UPSTREAM-REVISION.
+
+----------------------------------------------------------------------
+Project glue (everything outside vendor/openeuler/)
+----------------------------------------------------------------------
+
+Makefiles, Kbuild, dkms.conf.in, compat/, scripts/, debian/, docs/,
+patches/series, README, this file, etc. are written for this DKMS
+port and licensed GPL-2.0-only by enfs-dkms contributors. They are
+intentionally compatible with the kernel modules they produce.
+
+debian/copyright contains file-glob-specific stanzas matching what is
+actually in each vendored file's header.
+
+----------------------------------------------------------------------
+Full license text
+----------------------------------------------------------------------
+
+The complete GPL-2.0-only text:
+  https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
+
+On Debian systems also at /usr/share/common-licenses/GPL-2.

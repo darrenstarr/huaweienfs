@@ -1,0 +1,12 @@
+enfs-dkms (0.1.0-1) UNRELEASED; urgency=medium
+
+  * Initial scaffold.
+    - Vendor OpenEuler OLK-6.6 enfs sources under vendor/openeuler/.
+    - DKMS skeleton (dkms.conf.in, three BUILT_MODULE_* slots).
+    - Out-of-tree Kbuild stub.
+    - Compat header at compat/enfs_compat.h.
+    - Sync / port / deploy / dkms-install scripts.
+    - Architecture, porting and DKMS docs.
+    - Not yet buildable - see docs/PORTING-NOTES.md.
+
+ -- Darren <darren@example.invalid>  Thu, 30 Apr 2026 17:50:00 +0000

@@ -1,0 +1,122 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: enfs
+Upstream-Contact: openEuler kernel maintainers
+Source: https://gitee.com/openeuler/kernel
+Comment: Vendored from branch OLK-6.6. The exact pinned commit is
+ recorded in vendor/openeuler/UPSTREAM-REVISION inside this source tree.
+ Each vendored file's own SPDX-License-Identifier and copyright header
+ is authoritative; the stanzas below summarise them but do not override
+ them. Do not modify SPDX or copyright headers in vendor/openeuler/
+ files.
+
+# ---------------------------------------------------------------------
+# Files genuinely authored by Huawei for OpenEuler. Each carries an
+# explicit "Copyright (c) Huawei Technologies Co., Ltd." line.
+# ---------------------------------------------------------------------
+
+Files: vendor/openeuler/fs/nfs/enfs/*
+Copyright: 2025 Huawei Technologies Co., Ltd.
+License: GPL-2.0-only
+
+Files: vendor/openeuler/fs/nfs/enfs_adapter.c
+       vendor/openeuler/fs/nfs/enfs_adapter.h
+Copyright: 2025 Huawei Technologies Co., Ltd.
+License: GPL-2.0-only
+
+Files: vendor/openeuler/net/sunrpc/sunrpc_enfs_adapter.c
+       vendor/openeuler/include/linux/sunrpc/sunrpc_enfs_adapter.h
+Copyright: 2023 Huawei Technologies Co., Ltd.
+License: GPL-2.0-only
+
+# ---------------------------------------------------------------------
+# Stock Linux kernel files that OpenEuler patches but that retain their
+# original kernel-author copyright headers. We vendor the modified
+# OpenEuler copies verbatim. Listed copyright lines are taken directly
+# from each file's header; consult the file itself for the full set.
+# ---------------------------------------------------------------------
+
+Files: vendor/openeuler/fs/nfs/super.c
+Copyright: 1992 Rick Sladkey
+           Linux NFS subsystem contributors (see file header)
+License: GPL-2.0-only
+Comment: Modularised by Alan Cox. OpenEuler adds enfs hook sites under
+ #if IS_ENABLED(CONFIG_ENFS).
+
+Files: vendor/openeuler/fs/nfs/fs_context.c
+Copyright: 1992 Rick Sladkey
+           David Howells (new mount API conversion)
+           Linux NFS subsystem contributors (see file header)
+License: GPL-2.0-only
+Comment: OpenEuler adds enfs_info= mount option parsing under
+ #if IS_ENABLED(CONFIG_ENFS).
+
+Files: vendor/openeuler/fs/nfs/nfs3xdr.c
+Copyright: 1996, 1997 Olaf Kirch
+           Linux NFS subsystem contributors (see file header)
+License: GPL-2.0-only
+
+Files: vendor/openeuler/fs/nfs/internal.h
+       vendor/openeuler/fs/nfs/Kconfig
+       vendor/openeuler/fs/nfs/Makefile
+Copyright: Linux NFS subsystem contributors (see file headers)
+License: GPL-2.0-only
+Comment: Headers/Kconfig/Makefile lines added by OpenEuler are guarded
+ by IS_ENABLED(CONFIG_ENFS); base copyrights remain those of the
+ original Linux NFS contributors.
+
+Files: vendor/openeuler/net/sunrpc/clnt.c
+       vendor/openeuler/net/sunrpc/xprt.c
+Copyright: Linux SunRPC contributors (see file headers)
+License: GPL-2.0-only
+Comment: OpenEuler adds rpc_multipath_ops_* hook sites under
+ #if IS_ENABLED(CONFIG_SUNRPC_ENFS); base copyright remains that of
+ the original Linux SunRPC contributors.
+
+Files: vendor/openeuler/net/sunrpc/Kconfig
+       vendor/openeuler/net/sunrpc/Makefile
+Copyright: Linux SunRPC contributors (see file headers)
+License: GPL-2.0-only
+
+Files: vendor/openeuler/include/linux/nfs_fs_sb.h
+       vendor/openeuler/include/linux/nfs_xdr.h
+       vendor/openeuler/include/linux/sunrpc/sched.h
+       vendor/openeuler/include/linux/sunrpc/clnt.h
+Copyright: Linux NFS / SunRPC contributors (see file headers)
+License: GPL-2.0-only
+
+# ---------------------------------------------------------------------
+# Project glue (build / packaging / docs / scripts) — written for this
+# DKMS port. Kept GPL-2.0-only to remain compatible with the kernel
+# modules it produces.
+# ---------------------------------------------------------------------
+
+Files: Makefile
+       Kbuild
+       dkms.conf.in
+       compat/*
+       scripts/*
+       debian/*
+       docs/*
+       README.md
+       LICENSE
+       .gitignore
+       patches/series
+Copyright: 2026 enfs-dkms contributors
+License: GPL-2.0-only
+
+# ---------------------------------------------------------------------
+# License text.
+# ---------------------------------------------------------------------
+
+License: GPL-2.0-only
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; version 2 of the License.
+ .
+ This program is distributed in the hope that it will be useful, but
+ WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ General Public License for more details.
+ .
+ On Debian systems, the complete text of the GNU General Public
+ License version 2 can be found in /usr/share/common-licenses/GPL-2.

@@ -1,0 +1,44 @@
+# DKMS manifest for enfs-dkms.
+#
+# This file is the template; @VERSION@ is substituted by `make dkms-conf`
+# (or by debian/rules at package-build time) using the version from
+# debian/changelog.
+#
+# Build strategy: this DKMS module produces three kernel objects that
+# replace the in-tree NFS/SunRPC stack on the host:
+#   - sunrpc.ko  (stock + sunrpc_enfs_adapter.o)
+#   - nfs.ko     (stock + enfs_adapter.o, hooked super.c/fs_context.c/...)
+#   - enfs.ko    (the new multipath module)
+# DKMS installs them under /lib/modules/$kernelver/updates/, which has
+# higher precedence than kernel/ in modules.dep, so modprobe picks up the
+# replacements automatically. `dkms remove` restores the stock modules.
+
+PACKAGE_NAME="enfs"
+PACKAGE_VERSION="@VERSION@"
+
+# Kernel build is driven by the top-level Kbuild via $(MAKE) -C $kernel_source_dir M=$dkms_tree/...
+MAKE[0]="make -C ${kernel_source_dir} M=${dkms_tree}/${PACKAGE_NAME}/${PACKAGE_VERSION}/build modules"
+CLEAN="make -C ${kernel_source_dir} M=${dkms_tree}/${PACKAGE_NAME}/${PACKAGE_VERSION}/build clean"
+
+# Built modules and their install destinations under /lib/modules/$kver/.
+# Order matters for modprobe load order; place enfs last because it
+# depends on the patched sunrpc/nfs symbols.
+BUILT_MODULE_NAME[0]="sunrpc"
+BUILT_MODULE_LOCATION[0]="net/sunrpc"
+DEST_MODULE_LOCATION[0]="/updates"
+
+BUILT_MODULE_NAME[1]="nfs"
+BUILT_MODULE_LOCATION[1]="fs/nfs"
+DEST_MODULE_LOCATION[1]="/updates"
+
+BUILT_MODULE_NAME[2]="enfs"
+BUILT_MODULE_LOCATION[2]="fs/nfs/enfs"
+DEST_MODULE_LOCATION[2]="/updates"
+
+# Rebuild on every kernel update, autoload at install time.
+AUTOINSTALL="yes"
+REMAKE_INITRD="yes"
+
+# Tell DKMS to bail out on anything but x86_64 / arm64 — the OpenEuler
+# Kconfig restricts ENFS to those (see vendor/openeuler/fs/nfs/Kconfig).
+BUILD_EXCLUSIVE_ARCH="x86_64 aarch64"

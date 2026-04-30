@@ -1,0 +1,3 @@
+# Patches applied (in order) by scripts/apply-compat-shims.sh on top of
+# the vendored OpenEuler tree to materialise src/. Each line is a path
+# relative to this directory; '#' is a comment. None yet.

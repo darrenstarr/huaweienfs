@@ -1,0 +1,8 @@
+branch: OLK-6.6
+remote: https://gitee.com/openeuler/kernel.git
+commit: 5078a3a23a1e1825ec136485173ec98668cdd640
+subject: update README.
+committed: 2025-12-31T14:00:07+00:00
+vendored: 2026-04-30T15:48:31Z
+# fetched_from: see secrets/beast.md (local-only) for the build host path
+

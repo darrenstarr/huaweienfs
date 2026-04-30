@@ -1,0 +1,25 @@
+#!/usr/bin/make -f
+# debian/rules for enfs-dkms - source-only DKMS package.
+
+DKMS_SRC = $(CURDIR)/debian/enfs-dkms/usr/src/enfs-$(DEB_VERSION_UPSTREAM)
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# DKMS modules don't build at packaging time; the kernel build
+	# happens on the user's machine via DKMS. Do generate dkms.conf
+	# from the template so it can be installed.
+	sed 's|@VERSION@|$(DEB_VERSION_UPSTREAM)|g' dkms.conf.in > dkms.conf
+
+override_dh_auto_install:
+	# Stage the source tree into the dkms layout.
+	mkdir -p $(DKMS_SRC)
+	cp -a vendor src compat patches scripts Kbuild Makefile dkms.conf README.md LICENSE \
+	    docs $(DKMS_SRC)/
+	# `dh_dkms -V $(DEB_VERSION_UPSTREAM)` (in dh_dkms) will then
+	# register the package with DKMS at install time.
+
+override_dh_auto_clean:
+	rm -f dkms.conf
+	rm -rf src/.build-stamp
