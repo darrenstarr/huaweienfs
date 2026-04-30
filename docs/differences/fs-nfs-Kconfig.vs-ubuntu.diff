@@ -1,0 +1,148 @@
+--- /tmp/tmp.tYSqORsSZN/ubuntu	2026-04-30 18:34:56.706080776 +0200
++++ /home/darren/development/enfs/vendor/openeuler/fs/nfs/Kconfig	2026-04-30 17:42:52.000000000 +0200
+@@ -5,7 +5,6 @@
+ 	select CRC32
+ 	select LOCKD
+ 	select SUNRPC
+-	select NFS_COMMON
+ 	select NFS_ACL_SUPPORT if NFS_V3_ACL
+ 	help
+ 	  Choose Y here if you want to access files residing on other
+@@ -35,12 +34,12 @@
+ config NFS_V2
+ 	tristate "NFS client support for NFS version 2"
+ 	depends on NFS_FS
+-	default n
++	default y
+ 	help
+ 	  This option enables support for version 2 of the NFS protocol
+ 	  (RFC 1094) in the kernel's NFS client.
+ 
+-	  If unsure, say N.
++	  If unsure, say Y.
+ 
+ config NFS_V3
+ 	tristate "NFS client support for NFS version 3"
+@@ -78,16 +77,15 @@
+ 	tristate "NFS client support for NFS version 4"
+ 	depends on NFS_FS
+ 	select KEYS
+-	select SUNRPC_BACKCHANNEL
+ 	help
+-	  This option enables support for version 4.1 of the NFS protocol
+-	  (RFC 5661) in the kernel's NFS client.
++	  This option enables support for version 4 of the NFS protocol
++	  (RFC 3530) in the kernel's NFS client.
+ 
+ 	  To mount NFS servers using NFSv4, you also need to install user
+ 	  space programs which can be found in the Linux nfs-utils package,
+ 	  available from http://linux-nfs.org/.
+ 
+-	  If unsure, say N.
++	  If unsure, say Y.
+ 
+ config NFS_SWAP
+ 	bool "Provide swap over NFS support"
+@@ -97,19 +95,19 @@
+ 	help
+ 	  This option enables swapon to work on files located on NFS mounts.
+ 
+-config NFS_V4_0
+-	bool "NFS client support for NFSv4.0"
++config NFS_V4_1
++	bool "NFS client support for NFSv4.1"
+ 	depends on NFS_V4
+-	default y
++	select SUNRPC_BACKCHANNEL
+ 	help
+-	  This option enables support for minor version 0 of the NFSv4 protocol
+-	  (RFC 3530) in the kernel's NFS client.
++	  This option enables support for minor version 1 of the NFSv4 protocol
++	  (RFC 5661) in the kernel's NFS client.
+ 
+ 	  If unsure, say N.
+ 
+ config NFS_V4_2
+ 	bool "NFS client support for NFSv4.2"
+-	depends on NFS_V4
++	depends on NFS_V4_1
+ 	help
+ 	  This option enables support for minor version 2 of the NFSv4 protocol
+ 	  in the kernel's NFS client.
+@@ -118,22 +116,22 @@
+ 
+ config PNFS_FILE_LAYOUT
+ 	tristate
+-	depends on NFS_V4
++	depends on NFS_V4_1
+ 	default NFS_V4
+ 
+ config PNFS_BLOCK
+ 	tristate
+-	depends on NFS_V4 && BLK_DEV_DM
++	depends on NFS_V4_1 && BLK_DEV_DM
+ 	default NFS_V4
+ 
+ config PNFS_FLEXFILE_LAYOUT
+ 	tristate
+-	depends on NFS_V4
++	depends on NFS_V4_1 && NFS_V3
+ 	default NFS_V4
+ 
+ config NFS_V4_1_IMPLEMENTATION_ID_DOMAIN
+ 	string "NFSv4.1 Implementation ID Domain"
+-	depends on NFS_V4
++	depends on NFS_V4_1
+ 	default "kernel.org"
+ 	help
+ 	  This option defines the domain portion of the implementation ID that
+@@ -145,7 +143,7 @@
+ 
+ config NFS_V4_1_MIGRATION
+ 	bool "NFSv4.1 client support for migration"
+-	depends on NFS_V4
++	depends on NFS_V4_1
+ 	default n
+ 	help
+ 	  This option makes the NFS client advertise to NFSv4.1 servers that
+@@ -172,9 +170,8 @@
+ 
+ config NFS_FSCACHE
+ 	bool "Provide NFS client caching support"
+-	depends on NFS_FS
++	depends on NFS_FS=m && FSCACHE || NFS_FS=y && FSCACHE=y
+ 	select NETFS_SUPPORT
+-	select FSCACHE
+ 	help
+ 	  Say Y here if you want NFS data to be cached locally on disc through
+ 	  the general filesystem cache manager
+@@ -215,3 +212,29 @@
+ 	default y
+ 	help
+ 	 Choose Y here to enable use of the NFS v4.2 READ_PLUS operation.
++
++config ENFS
++	tristate "NFS client support for ENFS"
++	depends on NFS_FS
++	depends on X86 || X86_64 || ARM64
++	select SUNRPC_ENFS
++	default n
++	help
++	 This option enables support multipath of the NFS protocol
++	 in the kernel's NFS client.
++	 This feature will improve performance and reliability.
++
++	 If sure, say Y.
++
++config ENFS_KUNIT_TEST
++	bool "This builds the ENFS KUnit tests" if !KUNIT_ALL_TESTS
++	depends on KUNIT
++	default KUNIT_ALL_TESTS
++	help
++	  Only useful for kernel devs running KUnit test harness and are not
++	  for inclusion into a production build.
++
++	  For more information on KUnit and unit tests in general please refer
++	  to the KUnit documentation in Documentation/dev-tools/kunit/.
++
++	  If unsure, say N.

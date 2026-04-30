@@ -1,0 +1,374 @@
+--- /tmp/tmp.tYSqORsSZN/ubuntu	2026-04-30 18:36:49.890061358 +0200
++++ /home/darren/development/enfs/vendor/openeuler/fs/nfs/nfs3xdr.c	2026-04-30 17:42:52.000000000 +0200
+@@ -21,13 +21,18 @@
+ #include <linux/nfs3.h>
+ #include <linux/nfs_fs.h>
+ #include <linux/nfsacl.h>
+-#include <linux/nfs_common.h>
+-
+-#include "internal.h"
+ #include "nfstrace.h"
+-
++#include "internal.h"
++#if IS_ENABLED(CONFIG_ENFS)
++#include "linux/nfs_xdr.h"
++#define EXTEND_CMD_MAX_BUF_LEN 819200 /* 800K */
++#endif
+ #define NFSDBG_FACILITY		NFSDBG_XDR
+ 
++
++/* Mapping from NFS error code to "errno" error code. */
++#define errno_NFSERR_IO		EIO
++
+ /*
+  * Declare the space requirements for NFS arguments and replies as
+  * number of 32bit-words
+@@ -64,7 +69,9 @@
+ #define NFS3_readdirargs_sz	(NFS3_fh_sz+NFS3_cookieverf_sz+3)
+ #define NFS3_readdirplusargs_sz	(NFS3_fh_sz+NFS3_cookieverf_sz+4)
+ #define NFS3_commitargs_sz	(NFS3_fh_sz+3)
+-
++#if IS_ENABLED(CONFIG_ENFS)
++#define NFS3_extendargs_sz	(4 + XDR_QUADLEN(EXTEND_CMD_MAX_BUF_LEN))
++#endif
+ #define NFS3_getattrres_sz	(1+NFS3_fattr_sz)
+ #define NFS3_setattrres_sz	(1+NFS3_wcc_data_sz)
+ #define NFS3_removeres_sz	(NFS3_setattrres_sz)
+@@ -81,6 +88,9 @@
+ #define NFS3_fsinfores_sz	(1+NFS3_post_op_attr_sz+12)
+ #define NFS3_pathconfres_sz	(1+NFS3_post_op_attr_sz+6)
+ #define NFS3_commitres_sz	(1+NFS3_wcc_data_sz+2)
++#if IS_ENABLED(CONFIG_ENFS)
++#define NFS3_extendres_sz	(1 + 4 + XDR_QUADLEN(EXTEND_CMD_MAX_BUF_LEN))
++#endif
+ 
+ #define ACL3_getaclargs_sz	(NFS3_fh_sz+1)
+ #define ACL3_setaclargs_sz	(NFS3_fh_sz+1+ \
+@@ -90,6 +100,8 @@
+ 				NFS3_pagepad_sz)
+ #define ACL3_setaclres_sz	(1+NFS3_post_op_attr_sz)
+ 
++static int nfs3_stat_to_errno(enum nfs_stat);
++
+ /*
+  * Map file type to S_IFMT bits
+  */
+@@ -1366,6 +1378,19 @@
+ 
+ #endif  /* CONFIG_NFS_V3_ACL */
+ 
++#if IS_ENABLED(CONFIG_ENFS)
++static void nfs3_xdr_enc_extend3args(struct rpc_rqst *req,
++	struct xdr_stream *xdr, const void *data)
++{
++	const struct nfs_extend_xdr_arg *encArg = data;
++	__be32 *p;
++
++	WARN_ON_ONCE(encArg->buflen > EXTEND_CMD_MAX_BUF_LEN);
++	p = xdr_reserve_space(xdr, 4 + encArg->buflen);
++	xdr_encode_opaque(p, encArg->pBuf, encArg->buflen);
++}
++#endif
++
+ /*
+  * NFSv3 XDR decode functions
+  *
+@@ -1403,7 +1428,7 @@
+ out:
+ 	return error;
+ out_default:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -1442,7 +1467,7 @@
+ out:
+ 	return error;
+ out_status:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -1492,7 +1517,7 @@
+ 	error = decode_post_op_attr(xdr, result->dir_attr, userns);
+ 	if (unlikely(error))
+ 		goto out;
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -1534,7 +1559,7 @@
+ out:
+ 	return error;
+ out_default:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -1575,7 +1600,7 @@
+ out:
+ 	return error;
+ out_default:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -1655,7 +1680,7 @@
+ out:
+ 	return error;
+ out_status:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -1725,7 +1750,7 @@
+ out:
+ 	return error;
+ out_status:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -1792,7 +1817,7 @@
+ 	error = decode_wcc_data(xdr, result->dir_attr, userns);
+ 	if (unlikely(error))
+ 		goto out;
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -1832,7 +1857,7 @@
+ out:
+ 	return error;
+ out_status:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -1878,7 +1903,7 @@
+ out:
+ 	return error;
+ out_status:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -1923,7 +1948,7 @@
+ out:
+ 	return error;
+ out_status:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /**
+@@ -2098,7 +2123,7 @@
+ 	error = decode_post_op_attr(xdr, result->dir_attr, rpc_rqst_userns(req));
+ 	if (unlikely(error))
+ 		goto out;
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -2164,7 +2189,7 @@
+ out:
+ 	return error;
+ out_status:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -2240,7 +2265,7 @@
+ out:
+ 	return error;
+ out_status:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -2301,7 +2326,7 @@
+ out:
+ 	return error;
+ out_status:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ /*
+@@ -2347,7 +2372,7 @@
+ out:
+ 	return error;
+ out_status:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ #ifdef CONFIG_NFS_V3_ACL
+@@ -2413,7 +2438,7 @@
+ out:
+ 	return error;
+ out_default:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ static int nfs3_xdr_dec_setacl3res(struct rpc_rqst *req,
+@@ -2432,11 +2457,132 @@
+ out:
+ 	return error;
+ out_default:
+-	return nfs_stat_to_errno(status);
++	return nfs3_stat_to_errno(status);
+ }
+ 
+ #endif  /* CONFIG_NFS_V3_ACL */
+ 
++#if IS_ENABLED(CONFIG_ENFS)
++static int nfs3_xdr_dec_extend3res(struct rpc_rqst *req, struct xdr_stream *xdr,
++	void *result)
++{
++	enum nfs_stat status;
++	int			error;
++
++	struct nfs_extend_xdr_arg *decArg = result;
++	int			length;
++	__be32 *p;
++
++	// check the status
++	error = decode_nfsstat3(xdr, &status);
++
++	if (unlikely(error))
++		goto out;
++
++	if (status != NFS3_OK)
++		goto out_default;
++
++	// important for upgrade scenario
++	memset(decArg->pBuf, '\0', decArg->maxsize);
++
++	// decode legth of opaque data
++	p = xdr_inline_decode(xdr, 4);
++
++	if (unlikely(!p))
++		return -EIO;
++
++	length = be32_to_cpup(p++);
++
++	if (unlikely(length > decArg->maxsize)) {
++		dprintk("NFS: response size (%u) too big , max_size is %d\n", length,
++			decArg->maxsize);
++		return -E2BIG;
++	}
++
++	// decode length number of bytes
++	p = xdr_inline_decode(xdr, length);
++
++	if (unlikely(!p))
++		return -EIO;
++
++	decArg->buflen = length;
++	memcpy(decArg->pBuf, p, decArg->buflen);
++	dprintk("NFS: extend response size (%u)\n", length);
++
++
++out:
++	return error;
++
++
++out_default:
++	return nfs3_stat_to_errno(status);
++}
++#endif
++
++/*
++ * We need to translate between nfs status return values and
++ * the local errno values which may not be the same.
++ */
++static const struct {
++	int stat;
++	int errno;
++} nfs_errtbl[] = {
++	{ NFS_OK,		0		},
++	{ NFSERR_PERM,		-EPERM		},
++	{ NFSERR_NOENT,		-ENOENT		},
++	{ NFSERR_IO,		-errno_NFSERR_IO},
++	{ NFSERR_NXIO,		-ENXIO		},
++/*	{ NFSERR_EAGAIN,	-EAGAIN		}, */
++	{ NFSERR_ACCES,		-EACCES		},
++	{ NFSERR_EXIST,		-EEXIST		},
++	{ NFSERR_XDEV,		-EXDEV		},
++	{ NFSERR_NODEV,		-ENODEV		},
++	{ NFSERR_NOTDIR,	-ENOTDIR	},
++	{ NFSERR_ISDIR,		-EISDIR		},
++	{ NFSERR_INVAL,		-EINVAL		},
++	{ NFSERR_FBIG,		-EFBIG		},
++	{ NFSERR_NOSPC,		-ENOSPC		},
++	{ NFSERR_ROFS,		-EROFS		},
++	{ NFSERR_MLINK,		-EMLINK		},
++	{ NFSERR_NAMETOOLONG,	-ENAMETOOLONG	},
++	{ NFSERR_NOTEMPTY,	-ENOTEMPTY	},
++	{ NFSERR_DQUOT,		-EDQUOT		},
++	{ NFSERR_STALE,		-ESTALE		},
++	{ NFSERR_REMOTE,	-EREMOTE	},
++#ifdef EWFLUSH
++	{ NFSERR_WFLUSH,	-EWFLUSH	},
++#endif
++	{ NFSERR_BADHANDLE,	-EBADHANDLE	},
++	{ NFSERR_NOT_SYNC,	-ENOTSYNC	},
++	{ NFSERR_BAD_COOKIE,	-EBADCOOKIE	},
++	{ NFSERR_NOTSUPP,	-ENOTSUPP	},
++	{ NFSERR_TOOSMALL,	-ETOOSMALL	},
++	{ NFSERR_SERVERFAULT,	-EREMOTEIO	},
++	{ NFSERR_BADTYPE,	-EBADTYPE	},
++	{ NFSERR_JUKEBOX,	-EJUKEBOX	},
++	{ -1,			-EIO		}
++};
++
++/**
++ * nfs3_stat_to_errno - convert an NFS status code to a local errno
++ * @status: NFS status code to convert
++ *
++ * Returns a local errno value, or -EIO if the NFS status code is
++ * not recognized.  This function is used jointly by NFSv2 and NFSv3.
++ */
++static int nfs3_stat_to_errno(enum nfs_stat status)
++{
++	int i;
++
++	for (i = 0; nfs_errtbl[i].stat != -1; i++) {
++		if (nfs_errtbl[i].stat == (int)status)
++			return nfs_errtbl[i].errno;
++	}
++	dprintk("NFS: Unrecognized nfs status value: %u\n", status);
++	return nfs_errtbl[i].errno;
++}
++
++
+ #define PROC(proc, argtype, restype, timer)				\
+ [NFS3PROC_##proc] = {							\
+ 	.p_proc      = NFS3PROC_##proc,					\
+@@ -2471,7 +2617,11 @@
+ 	PROC(FSINFO,		getattr,	fsinfo,		0),
+ 	PROC(PATHCONF,		getattr,	pathconf,	0),
+ 	PROC(COMMIT,		commit,		commit,		5),
++#if IS_ENABLED(CONFIG_ENFS)
++	PROC(EXTEND,		extend,		extend,		0),
++#endif
+ };
++EXPORT_SYMBOL_GPL(nfs3_procedures);
+ 
+ static unsigned int nfs_version3_counts[ARRAY_SIZE(nfs3_procedures)];
+ const struct rpc_version nfs_version3 = {
