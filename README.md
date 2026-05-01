@@ -168,7 +168,11 @@ make sync-vm  VM_HOST=ubuntu@10.0.0.42  VM_PATH=/home/ubuntu/enfs-dkms
 The reference deployment for this project is documented in
 `secrets/beast.md` and `secrets/test-vm.md` (local-only).
 
-## Quick start
+## Just want to install and use it?
+
+→ **[Quickstart: zero-to-mounted in 3 minutes](docs/user/00-quickstart.md)** (5 commands, one reboot, one diagram)
+
+## Developer quick start
 
 ```bash
 make help                # list all targets and current variable values
@@ -176,20 +180,22 @@ make port                # materialise src/ from vendor + compat + patches
 make sync-vm             # rsync to the test VM (set VM_HOST first)
 make build-on-vm         # build modules on the test VM against its headers
 make smoke-on-vm         # build + dkms-install + modprobe enfs + dmesg tail
+make deb                 # build the .deb on the local box
 ```
 
 ## Documentation map
 
-- **Architecture** — `docs/ARCHITECTURE.md` (component map, hook sites)
-- **Porting status** — `docs/PORTING-NOTES.md` (API drift table, work list)
-- **DKMS internals** — `docs/DKMS-NOTES.md` (why three modules, install layout)
 - **User docs** — `docs/user/`:
+  - **[00-quickstart.md](docs/user/00-quickstart.md) — start here: 3-minute install, then mount your storage**
   - [01-overview.md](docs/user/01-overview.md) — what enfs is, when to use it (and when not)
-  - [02-installation.md](docs/user/02-installation.md) — install from `.deb` or source, verify, load
+  - [02-installation.md](docs/user/02-installation.md) — long-form install reference (build from source, signed packages, kernel-update behaviour)
   - [03-mount-syntax.md](docs/user/03-mount-syntax.md) — `remoteaddrs=`, `localaddrs=`, `enfs_info=` reference
   - [04-operations.md](docs/user/04-operations.md) — `/proc/enfs/`, sysfs, live remount, DNS rebind, `tcpdump`
   - [05-troubleshooting.md](docs/user/05-troubleshooting.md) — symptom -> cause -> fix runbook
   - [06-uninstall.md](docs/user/06-uninstall.md) — clean rollback to stock NFS
+- **Architecture** — `docs/ARCHITECTURE.md` (component map, hook sites)
+- **Porting status** — `docs/PORTING-NOTES.md` (API drift table, work list)
+- **DKMS internals** — `docs/DKMS-NOTES.md` (why three modules, install layout)
 - **Stock-vs-eNFS diff report** — `docs/differences/` (planned)
 - **AI agent guidance** — `docs/ai-agent-guide.md` (rules for Claude/etc.)
 
