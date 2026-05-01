@@ -126,6 +126,13 @@ if [[ -n "$(ls -A "$COMPAT_DIR" 2>/dev/null)" ]]; then
     cp -a "$COMPAT_DIR"/. "$SRC_DIR/compat/"
 fi
 
-# 6. Summary.
+# 6. Drop the project's top-level Kbuild into src/ so `make M=src` finds it.
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
+if [[ -f "$project_root/Kbuild" ]]; then
+    log "installing top-level Kbuild as src/Kbuild"
+    cp "$project_root/Kbuild" "$SRC_DIR/Kbuild"
+fi
+
+# 7. Summary.
 file_count=$(find "$SRC_DIR" -type f | wc -l)
 echo "[build-src-tree] ${file_count} files, ${patches_applied} patches applied, ready in ${SRC_DIR}"
