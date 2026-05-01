@@ -13,3 +13,5 @@
 0010-fs-nfs-super-add-enfs-hooks.patch
 0011-fs-nfs-fs_context-add-enfs_info-mount-option.patch
 0012-fs-nfs-nfs3xdr-extend-call.patch
+0013-net-sunrpc-clnt-multipath-hooks.patch
+0014-net-sunrpc-xprt-multipath-hooks.patch
