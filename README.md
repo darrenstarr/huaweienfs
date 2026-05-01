@@ -199,6 +199,38 @@ make deb                 # build the .deb on the local box
 - **Stock-vs-eNFS diff report** — `docs/differences/` (planned)
 - **AI agent guidance** — `docs/ai-agent-guide.md` (rules for Claude/etc.)
 
+## How this port was made
+
+Almost the entire effort that produced this repository — the architectural
+decisions, the patch series, the `__GENKSYMS__` CRC trick that makes our
+patched `sunrpc.ko` interoperate with stock `lockd` / `nfs_acl` /
+`nfsd`, the DKMS scaffolding, the .deb packaging, the multi-server LXC
+test topology, the prose documentation under `docs/changes/` and
+`docs/user/`, and the verification that 1 MiB NFS reads round-robin
+across 4 servers — was driven by **[Claude](https://claude.com/) Opus 4.7
+running in 1M-token context mode**. A human (the repo owner) provided
+direction, reviewed checkpoints, vetoed bad approaches, and supplied the
+test infrastructure; the heavy lifting was the model.
+
+The Anthropic API tokens for this work were generously paid for by the
+**[Center for Information Technology, University of Oslo](https://www.uio.no/english/services/it/)**.
+Many thanks.
+
+### Liability
+
+**We take NO responsibility for this code in any way.**
+
+If it works for your storage system: AWESOME, please tell us.
+
+If it doesn't: it's Claude's fault. Open an issue with the dmesg output
+and we'll have a model fix the model's bugs.
+
+If it eats your data, melts your kernel, or sets your servers on fire:
+GPL-2.0 §15 ("NO WARRANTY") is exactly what it says, and `__GENKSYMS__`
+gymnastics on a kernel module that *replaces* parts of the in-tree NFS
+client stack is not something to deploy on production storage without
+your own thorough validation. Use a non-critical staging mount first.
+
 ## License
 
 GPL-2.0-only.
