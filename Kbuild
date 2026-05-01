@@ -93,12 +93,21 @@ nfs-y := \
 	fs/nfs/write.o fs/nfs/namespace.o fs/nfs/mount_clnt.o \
 	fs/nfs/nfstrace.o fs/nfs/export.o fs/nfs/sysfs.o \
 	fs/nfs/fs_context.o fs/nfs/sysctl.o fs/nfs/fscache.o \
-	fs/nfs/nfs3xdr.o \
 	fs/nfs/enfs_adapter.o
-# nfs3xdr.o is normally part of nfsv3.ko (a separate module), but enfs
-# references nfs3_procedures[] across module boundaries, so we link it
-# into nfs.ko and export it from there. The exported symbol is added
-# by patch 0018.
+# Note: stock kernel builds nfs3xdr.o INTO nfsv3.ko, not nfs.ko.
+# We do the same — nfs3_procedures[] is exported from nfsv3.ko (see
+# below) and enfs.ko depends on nfsv3.ko at runtime.
+
+# ---------------------------------------------------------------------
+# nfsv3.ko — NFSv3 client.
+# Mirrors the stock fs/nfs/Makefile nfsv3-y line (minus ACL — we keep
+# CONFIG_NFS_V3_ACL effectively off since rebuilding the whole ACL
+# story isn't strictly needed for the multipath e2e test).
+# ---------------------------------------------------------------------
+obj-m += fs/nfs/nfsv3.o
+fs/nfs/nfsv3-y := \
+	fs/nfs/nfs3super.o fs/nfs/nfs3client.o fs/nfs/nfs3proc.o \
+	fs/nfs/nfs3xdr.o fs/nfs/nfs3acl.o
 # Dropped from v0 (optional features that pull in symbols not exported
 # by stock Ubuntu sunrpc/nfslocalio):
 #   - fs/nfs/nfsroot.o  (NFS-on-root needs root_server_addr/path)
