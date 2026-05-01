@@ -16,3 +16,5 @@
 0016-net-sunrpc-clnt-export-rpc_task_get_next_xprt.patch
 0017-net-sunrpc-xprtmultipath-export-helpers-for-enfs.patch
 0018-sunrpc-nfs-export-helpers-for-enfs.patch
+0019-fs-nfs-client-propagate-enfs-option.patch
+0020-net-sunrpc-clnt-add-rpc_clnt_test_xprt.patch

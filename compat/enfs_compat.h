@@ -63,34 +63,25 @@ void xprt_switch_add_xprt_locked(struct rpc_xprt_switch *xps, struct rpc_xprt *x
 #endif
 
 /*
- * rpc_clnt_test_xprt() / rpc_localalladdr() — OE-specific helpers used
- * by enfs's path-monitor (fs/nfs/enfs/{enfs_proc,pm_ping}.c).
- *
- * For now, stub them out. The functionality affected is the
- * enfs path-test ping and the localaddr enumeration that powers
- * `localaddrs=` mount option binding to local NIC IPs. Without these
- * stubs the build fails; with the stubs, those features are no-ops
- * (mount still works against a remote-only multipath set).
- *
- * TODO: properly implement these by porting OE's versions into compat/
- * or as additional patches against net/sunrpc/.
+ * rpc_clnt_test_xprt() — patch 0020 implements this in
+ * net/sunrpc/clnt.c (OE-style); just declare it here.
  */
-struct rpc_clnt;
-struct sockaddr;
-static inline int enfs_compat_rpc_clnt_test_xprt(struct rpc_clnt *clnt,
-		struct rpc_xprt *xprt, void *ops, void *data, int flags)
-{
-	(void)clnt; (void)xprt; (void)ops; (void)data; (void)flags;
-	WARN_ONCE(1, "enfs: rpc_clnt_test_xprt stubbed");
-	return 0;
-}
-#define rpc_clnt_test_xprt(c, x, o, d, f) enfs_compat_rpc_clnt_test_xprt(c, x, o, d, f)
+struct rpc_call_ops;
+int rpc_clnt_test_xprt(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
+		       const struct rpc_call_ops *ops, void *data, int flags);
 
+/*
+ * rpc_localalladdr() — OE-specific helper that enumerates local-NIC
+ * source addresses for the `localaddrs=` mount option's auto-bind
+ * mode. Stub returns 0 (no addresses) so callers fall through to the
+ * explicit IP list provided by the user. Mount still works.
+ */
+struct sockaddr;
 static inline size_t enfs_compat_rpc_localalladdr(struct rpc_xprt *xprt,
 		struct sockaddr *buf, size_t buflen)
 {
 	(void)xprt; (void)buf; (void)buflen;
-	WARN_ONCE(1, "enfs: rpc_localalladdr stubbed");
+	WARN_ONCE(1, "enfs: rpc_localalladdr stubbed (auto-bind unavailable; use explicit localaddrs=)");
 	return 0;
 }
 #define rpc_localalladdr(x, b, l) enfs_compat_rpc_localalladdr(x, b, l)
