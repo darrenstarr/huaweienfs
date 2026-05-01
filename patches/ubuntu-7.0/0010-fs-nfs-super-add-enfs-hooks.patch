@@ -1,0 +1,67 @@
+From: enfs-dkms
+Subject: [PATCH] fs/nfs/super.c: add enfs adapter include + remount/mount hooks
+
+Three additive hook sites:
+
+  1. Include enfs_adapter.h alongside the other "fs/nfs/" private
+     headers, so this TU can call enfs_free_mount_options() and
+     enfs_trigger_get_server_capability().
+
+  2. In nfs_reconfigure() (the remount path) — after the
+     skip_reconfig_option_check fast-exit but before the noac/SYNC
+     handling, call nfs_remount_iplist() if the user supplied a new
+     enfs_info= path list. On failure, free the parsed options and
+     bubble the error back. The iplist call lives in
+     fs/nfs/enfs/enfs_remount.c.
+
+  3. In nfs_get_tree_common() (the mount completion path) — after
+     SB_ACTIVE is set, kick off the enfs server-capability probe so
+     enfs.ko knows which servers in the multipath set respond.
+
+All three are guarded by CONFIG_ENFS so a non-enfs build is a no-op.
+
+---
+ fs/nfs/super.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+--- a/fs/nfs/super.c
++++ b/fs/nfs/super.c
+@@ -66,6 +66,9 @@
+ #include "callback.h"
+ #include "delegation.h"
+ #include "iostat.h"
++#if IS_ENABLED(CONFIG_ENFS)
++#include "enfs_adapter.h"
++#endif
+ #include "internal.h"
+ #include "fscache.h"
+ #include "nfs4session.h"
+@@ -1041,6 +1044,17 @@
+ 	 */
+ 	if (ctx->skip_reconfig_option_check)
+ 		return 0;
++#if IS_ENABLED(CONFIG_ENFS)
++	if (ctx->enfs_option) {
++		int error = nfs_remount_iplist(nfss->nfs_client, ctx->enfs_option);
++
++		if (error) {
++			/* release remount option member */
++			enfs_free_mount_options(ctx);
++			return error;
++		}
++	}
++#endif
+
+ 	/*
+ 	 * noac is a special case. It implies -o sync, but that's not
+@@ -1335,6 +1349,10 @@
+ 	}
+
+ 	s->s_flags |= SB_ACTIVE;
++#if IS_ENABLED(CONFIG_ENFS)
++	if (server)
++		enfs_trigger_get_server_capability(server);
++#endif
+ 	error = 0;
+
+ out:

@@ -1,0 +1,37 @@
+From: enfs-dkms
+Subject: [PATCH] include/linux/nfs_xdr.h: add struct nfs_extend_xdr_arg
+
+enfs's NFSv3 extended-call support (fs/nfs/enfs/exten_call.c) needs a
+small carrier struct for the extra XDR payload appended to certain v3
+operations. The struct is consumed by both nfs.ko (after our fs/nfs/
+nfs3xdr.c patch encodes/decodes it) and by enfs.ko itself.
+
+We append it after the nfs_rpc_ops vtable struct (the last data struct
+in the file before the helper-function block), guarded by CONFIG_ENFS.
+
+NOTE: this struct enables a non-standard extension to the NFSv3 wire
+format. Standard NFSv3 servers that don't speak the OpenEuler extension
+will reject calls that carry it. Documented as a compat risk in
+docs/PORTING-NOTES.md § "nfs3xdr v3 wire format".
+
+---
+ include/linux/nfs_xdr.h | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+--- a/include/linux/nfs_xdr.h
++++ b/include/linux/nfs_xdr.h
+@@ -1858,6 +1858,14 @@ struct nfs_rpc_ops {
+ 	void	(*enable_swap)(struct inode *inode);
+ 	void	(*disable_swap)(struct inode *inode);
+ };
++
++#if IS_ENABLED(CONFIG_ENFS)
++struct nfs_extend_xdr_arg {
++	int	 maxsize;
++	int	 buflen;
++	char	*pBuf;
++};
++#endif
+
+ /*
+  * Helper functions used by NFS client and/or server

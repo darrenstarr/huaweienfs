@@ -15,24 +15,22 @@ the end of the struct, growing it. This is acceptable for an
 out-of-tree replacement of sunrpc.ko (we control all consumers).
 
 ---
- include/linux/sunrpc/clnt.h | 5 +++++
- 1 file changed, 5 insertions(+)
+ include/linux/sunrpc/clnt.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
 
 --- a/include/linux/sunrpc/clnt.h
 +++ b/include/linux/sunrpc/clnt.h
-@@ -64,7 +64,9 @@ struct rpc_clnt {
- 				cl_noretranstimeo: 1,/* No retransmit timeouts */
+@@ -65,6 +65,9 @@
  				cl_autobind : 1,/* use getport() */
  				cl_chatty   : 1,/* be verbose */
--				cl_shutdown : 1,/* rpc immediate -EIO */
-+				cl_shutdown : 1,/* rpc immediate -EIO */
+ 				cl_shutdown : 1,/* rpc immediate -EIO */
 +#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
 +				cl_enfs     : 1,/* enfs multipath enabled */
 +#endif
  				cl_netunreach_fatal : 1;
  						/* Treat ENETUNREACH errors as fatal */
  	struct xprtsec_parms	cl_xprtsec;	/* transport security policy */
-@@ -106,5 +108,8 @@ struct rpc_clnt {
+@@ -96,6 +99,9 @@
  	unsigned int		cl_max_connect; /* max number of transports not to the same IP */
  	struct super_block *pipefs_sb;
  	atomic_t		cl_task_count;
@@ -40,3 +38,5 @@ out-of-tree replacement of sunrpc.ko (we control all consumers).
 +	void			*multipath_option;
 +#endif
  };
+
+ /*

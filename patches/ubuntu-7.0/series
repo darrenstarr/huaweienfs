@@ -7,3 +7,8 @@
 0004-net-sunrpc-Kconfig-add-CONFIG_SUNRPC_ENFS.patch
 0005-include-sunrpc-clnt.h-add-multipath-fields.patch
 0006-include-sunrpc-sched.h-add-RPC_TASK_ENFS.patch
+0007-include-nfs_fs_sb-add-enfs-fields.patch
+0008-include-nfs_xdr-add-extend-xdr-arg.patch
+0009-fs-nfs-internal-add-enfs-option-fields.patch
+0010-fs-nfs-super-add-enfs-hooks.patch
+0011-fs-nfs-fs_context-add-enfs_info-mount-option.patch
