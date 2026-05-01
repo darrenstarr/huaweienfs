@@ -183,7 +183,13 @@ make smoke-on-vm         # build + dkms-install + modprobe enfs + dmesg tail
 - **Architecture** — `docs/ARCHITECTURE.md` (component map, hook sites)
 - **Porting status** — `docs/PORTING-NOTES.md` (API drift table, work list)
 - **DKMS internals** — `docs/DKMS-NOTES.md` (why three modules, install layout)
-- **User docs** — `docs/user/` (planned: install, mount syntax, ops, troubleshoot)
+- **User docs** — `docs/user/`:
+  - [01-overview.md](docs/user/01-overview.md) — what enfs is, when to use it (and when not)
+  - [02-installation.md](docs/user/02-installation.md) — install from `.deb` or source, verify, load
+  - [03-mount-syntax.md](docs/user/03-mount-syntax.md) — `remoteaddrs=`, `localaddrs=`, `enfs_info=` reference
+  - [04-operations.md](docs/user/04-operations.md) — `/proc/enfs/`, sysfs, live remount, DNS rebind, `tcpdump`
+  - [05-troubleshooting.md](docs/user/05-troubleshooting.md) — symptom -> cause -> fix runbook
+  - [06-uninstall.md](docs/user/06-uninstall.md) — clean rollback to stock NFS
 - **Stock-vs-eNFS diff report** — `docs/differences/` (planned)
 - **AI agent guidance** — `docs/ai-agent-guide.md` (rules for Claude/etc.)
 
