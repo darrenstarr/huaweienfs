@@ -72,8 +72,8 @@ dkms-conf:
 	sed 's|@VERSION@|$(VERSION)|g' dkms.conf.in > dkms.conf
 
 .PHONY: dkms-install
-dkms-install: dkms-conf port
-	scripts/dkms-install.sh "$(PROJECT)" "$(VERSION)" "$(SRC_DIR)" "$(CURDIR)/dkms.conf"
+dkms-install: dkms-conf
+	scripts/dkms-install.sh "$(PROJECT)" "$(VERSION)" "$(CURDIR)" "$(CURDIR)/dkms.conf"
 
 .PHONY: dkms-uninstall
 dkms-uninstall:
