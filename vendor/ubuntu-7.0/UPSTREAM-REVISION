@@ -1,0 +1,17 @@
+source: Ubuntu 26.04 LTS ("resolute") kernel package
+package: linux_7.0.0-14.14
+abi: 7.0.0-14
+archive: http://archive.ubuntu.com/ubuntu/pool/main/l/linux/
+dsc: linux_7.0.0-14.14.dsc
+orig_tarball: linux_7.0.0.orig.tar.gz
+diff_gz: linux_7.0.0-14.14.diff.gz
+vendored: 2026-05-01
+
+# Refresh procedure (run by maintainer when Ubuntu publishes a new 7.0 ABI):
+#   scripts/sync-ubuntu-source.sh <path-to-extracted-linux-7.0.0>
+#
+# The 14 files vendored here are the only stock Linux files that enfs
+# needs to patch. Each retains its original SPDX-License-Identifier and
+# kernel-author copyright header verbatim — DO NOT EDIT THOSE.
+#
+# The patches we apply on top live in patches/ubuntu-7.0/series.

@@ -1,0 +1,40 @@
+From: enfs-dkms
+Subject: [PATCH] include/linux/sunrpc/sched.h: add RPC_TASK_ENFS / RPC_TASK_FIXED
+
+OpenEuler's enfs claims two RPC_TASK_* flag bits to mark tasks that go
+through the enfs dispatch path:
+
+  - RPC_TASK_ENFS (0x0008) — task dispatched from the enfs subsystem.
+    0x0008 was free in OE 6.6 and remains free in Ubuntu 7.0.
+  - RPC_TASK_FIXED — used by enfs's path-monitor (pm_ping.c) and
+    failover paths to mark tasks that should not be re-routed.
+
+OE picked 0x0040 for RPC_TASK_FIXED in 6.6, but **0x0040 is now taken
+by RPC_TASK_NETUNREACH_FATAL** in Ubuntu 7.0 (added by mainline post-
+6.6). We therefore relocate RPC_TASK_FIXED to **0x0020**, which is
+free in 7.0, and document the rebased bit in
+docs/changes/06-task-flags.md so future readers don't grep for 0x0040
+and get confused.
+
+The references to RPC_TASK_FIXED in enfs source are all symbolic
+(no numeric literal anywhere — verified with `grep -rn 0x0040
+fs/nfs/enfs/`), so this rebase is safe.
+
+---
+ include/linux/sunrpc/sched.h | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+--- a/include/linux/sunrpc/sched.h
++++ b/include/linux/sunrpc/sched.h
+@@ -144,6 +144,11 @@ struct rpc_task_setup {
+ #define RPC_TASK_NO_RETRANS_TIMEOUT	0x4000		/* wait forever for a reply */
+ #define RPC_TASK_CRED_NOREF	0x8000		/* No refcount on the credential */
+
++#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
++#define RPC_TASK_FIXED		0x0020		/* enfs: pinned to its current xprt (rebased from OE's 0x0040 — collides w/ RPC_TASK_NETUNREACH_FATAL on 7.0) */
++#define RPC_TASK_ENFS		0x0008		/* enfs: dispatched by the enfs subsystem */
++#endif
++
+ #define RPC_IS_ASYNC(t)		((t)->tk_flags & RPC_TASK_ASYNC)
+ #define RPC_IS_SWAPPER(t)	((t)->tk_flags & RPC_TASK_SWAPPER)
+ #define RPC_IS_SOFT(t)		((t)->tk_flags & (RPC_TASK_SOFT|RPC_TASK_TIMEOUT))

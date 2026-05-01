@@ -1,0 +1,42 @@
+From: enfs-dkms
+Subject: [PATCH] include/linux/sunrpc/clnt.h: add cl_enfs bitfield and multipath_option
+
+OpenEuler's enfs adds two fields to struct rpc_clnt:
+
+  - cl_enfs: 1 — bit indicating this client has enfs multipath enabled.
+  - multipath_option — opaque pointer to enfs's per-client multipath
+    state.
+
+Both are guarded by CONFIG_SUNRPC_ENFS.
+
+OE 6.6 had KABI_RESERVE slots that they consumed for these. Ubuntu
+7.0 doesn't carry KABI reservation, so we just append the field at
+the end of the struct, growing it. This is acceptable for an
+out-of-tree replacement of sunrpc.ko (we control all consumers).
+
+---
+ include/linux/sunrpc/clnt.h | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+--- a/include/linux/sunrpc/clnt.h
++++ b/include/linux/sunrpc/clnt.h
+@@ -64,7 +64,9 @@ struct rpc_clnt {
+ 				cl_noretranstimeo: 1,/* No retransmit timeouts */
+ 				cl_autobind : 1,/* use getport() */
+ 				cl_chatty   : 1,/* be verbose */
+-				cl_shutdown : 1,/* rpc immediate -EIO */
++				cl_shutdown : 1,/* rpc immediate -EIO */
++#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
++				cl_enfs     : 1,/* enfs multipath enabled */
++#endif
+ 				cl_netunreach_fatal : 1;
+ 						/* Treat ENETUNREACH errors as fatal */
+ 	struct xprtsec_parms	cl_xprtsec;	/* transport security policy */
+@@ -106,5 +108,8 @@ struct rpc_clnt {
+ 	unsigned int		cl_max_connect; /* max number of transports not to the same IP */
+ 	struct super_block *pipefs_sb;
+ 	atomic_t		cl_task_count;
++#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
++	void			*multipath_option;
++#endif
+ };
