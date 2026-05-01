@@ -19,10 +19,16 @@ The exact upstream commit we vendored is recorded in
 
 ## Status
 
-**Early scaffold.** OpenEuler sources are vendored under
-`vendor/openeuler/`. The DKMS scaffolding, packaging and porting docs
-are in place. End-to-end build against an Ubuntu 26.04 kernel is the
-next milestone — see `docs/PORTING-NOTES.md`.
+**Active porting.** Patches are landing in `patches/ubuntu-7.0/` and
+the build pipeline is being wired up. The project follows
+**Option B′**: vendor the 14 stock Ubuntu 7.0 kernel files we need
+under `vendor/ubuntu-7.0/`, apply small focused patches on top, and
+combine them with the OE-only "new" files under
+`vendor/openeuler/{enfs/, *_adapter.*}` to produce `nfs.ko`,
+`sunrpc.ko` and `enfs.ko` against the user's installed
+`linux-headers-*`. See `docs/PORTING-NOTES.md` for the porting model
+and per-patch index, and `docs/ARCHITECTURE.md` for the build
+pipeline.
 
 ## What enfs does (one-page summary)
 
@@ -57,21 +63,37 @@ as well. DKMS gives us:
 ## Layout
 
 ```
-vendor/openeuler/         Verbatim OpenEuler OLK-6.6 sources we depend on
-  fs/nfs/enfs/              the standalone enfs.ko sources
-  fs/nfs/enfs_adapter.*     glue compiled into nfs.ko
-  fs/nfs/{super,fs_context,nfs3xdr,internal.h,Kconfig,Makefile}
-                            stock NFS files OpenEuler patches
+vendor/openeuler/         Reference + source for the OE-only "new" files
+                          (verbatim OpenEuler OLK-6.6 sources)
+  fs/nfs/enfs/              the standalone enfs.ko sources [BUILT]
+  fs/nfs/enfs_adapter.*     glue compiled into nfs.ko      [BUILT]
   net/sunrpc/sunrpc_enfs_adapter.c
-                            glue compiled into sunrpc.ko
+                            glue compiled into sunrpc.ko   [BUILT]
+  include/linux/sunrpc/sunrpc_enfs_adapter.h               [BUILT]
+  fs/nfs/{super,fs_context,nfs3xdr,internal.h,Kconfig,Makefile}
   net/sunrpc/{clnt,xprt,Kconfig,Makefile}
-                            stock SunRPC files OpenEuler patches
   include/linux/{nfs_fs_sb,nfs_xdr}.h
-  include/linux/sunrpc/{sched,clnt,sunrpc_enfs_adapter}.h
-  UPSTREAM-REVISION         pinned commit we vendored from
+  include/linux/sunrpc/{sched,clnt}.h
+                            OE-modified copies, kept for reference / diff
+                            (NOT built directly under Option B′)
+  UPSTREAM-REVISION         pinned OpenEuler commit we vendored from
+
+vendor/ubuntu-7.0/        Stock Ubuntu 26.04 kernel files we patch
+                          (verbatim from linux_7.0.0-14.14)
+  fs/nfs/{super,fs_context,nfs3xdr,internal.h,Kconfig,Makefile}
+  net/sunrpc/{clnt,xprt,Kconfig,Makefile}
+  include/linux/{nfs_fs_sb,nfs_xdr}.h
+  include/linux/sunrpc/{sched,clnt}.h
+                            14 stock files; original SPDX/copyright
+                            headers preserved verbatim
+  UPSTREAM-REVISION         pinned Ubuntu kernel package
+
+patches/ubuntu-7.0/       Patches applied on top of vendor/ubuntu-7.0/
+  series                    ordered list applied by `make port`
+  *.patch                   one focused patch per file/feature
+
 src/                      Project sources after porting (generated; gitignored)
-compat/                   Kernel-version compat shims (Ubuntu 7.0 vs OE 6.6)
-patches/                  Patches we apply on top of vendored sources
+compat/                   Kernel-version compat shims
 debian/                   dpkg packaging (enfs-dkms .deb)
 scripts/                  Build / sync / VM-deploy helpers
 docs/                     User docs + ARCHITECTURE / PORTING / DKMS notes
@@ -79,6 +101,48 @@ dkms.conf.in              DKMS manifest template
 Kbuild                    Top-level out-of-tree build entry
 Makefile                  `make help` lists targets
 ```
+
+## How the build works
+
+Under **Option B′**, three input streams converge to produce the three
+`.ko` files we ship. Stock Ubuntu source is patched in place; the
+OE-only "new" files (enfs subsystem + adapter glue) are dropped in
+alongside as additions.
+
+```mermaid
+flowchart LR
+    U["vendor/ubuntu-7.0/<br/>(14 stock kernel files)"]
+    OE["vendor/openeuler/<br/>enfs/ + *_adapter.*<br/>(OE-only new files)"]
+    P["patches/ubuntu-7.0/series<br/>(focused patches)"]
+
+    U --> PORT
+    OE --> PORT
+    P --> PORT
+
+    PORT(["make port"]) --> SRC["src/<br/>(generated tree)"]
+
+    SRC --> MM(["make modules<br/>(against linux-headers-$KVER)"])
+
+    MM --> M1["nfs.ko"]
+    MM --> M2["sunrpc.ko"]
+    MM --> M3["enfs.ko"]
+
+    M1 --> INST["/lib/modules/$KVER/updates/"]
+    M2 --> INST
+    M3 --> INST
+
+    classDef vendored fill:#eef,stroke:#447
+    classDef patches fill:#fff4cc,stroke:#b58a00,color:#000
+    classDef built fill:#e1f5d4,stroke:#3a8c2a,color:#000
+    class U,OE vendored
+    class P patches
+    class M1,M2,M3 built
+```
+
+`updates/` outranks `kernel/` in `depmod` order, so subsequent
+`modprobe nfs` / `modprobe sunrpc` pick up our patched copies.
+See `docs/ARCHITECTURE.md` § Build pipeline for more detail and
+`docs/PORTING-NOTES.md` for the per-patch index.
 
 ## Development environment (placeholders)
 

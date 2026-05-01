@@ -85,6 +85,60 @@ Copyright: Linux NFS / SunRPC contributors (see file headers)
 License: GPL-2.0-only
 
 # ---------------------------------------------------------------------
+# Stock Ubuntu 26.04 kernel files (vendor/ubuntu-7.0/) — verbatim from
+# the Ubuntu linux_7.0.0-14.14 source package. These are the files that
+# our patches/ubuntu-7.0/*.patch series modify. Each retains its
+# original SPDX-License-Identifier and Linux kernel-author copyright
+# header verbatim. The pinned upstream package is recorded in
+# vendor/ubuntu-7.0/UPSTREAM-REVISION. Do not modify SPDX or copyright
+# headers in any vendor/ubuntu-7.0/ file.
+# ---------------------------------------------------------------------
+
+Files: vendor/ubuntu-7.0/fs/nfs/super.c
+Copyright: 1992 Rick Sladkey
+           Linux NFS subsystem contributors (see file header)
+License: GPL-2.0-only
+Comment: Modularised by Alan Cox; further split by David Howells.
+
+Files: vendor/ubuntu-7.0/fs/nfs/fs_context.c
+Copyright: 1992 Rick Sladkey
+           David Howells (new mount API conversion)
+           Linux NFS subsystem contributors (see file header)
+License: GPL-2.0-only
+
+Files: vendor/ubuntu-7.0/fs/nfs/nfs3xdr.c
+Copyright: 1996, 1997 Olaf Kirch
+           Linux NFS subsystem contributors (see file header)
+License: GPL-2.0-only
+
+Files: vendor/ubuntu-7.0/fs/nfs/internal.h
+       vendor/ubuntu-7.0/fs/nfs/Kconfig
+       vendor/ubuntu-7.0/fs/nfs/Makefile
+Copyright: Linux NFS subsystem contributors (see file headers)
+License: GPL-2.0-only
+
+Files: vendor/ubuntu-7.0/net/sunrpc/clnt.c
+       vendor/ubuntu-7.0/net/sunrpc/xprt.c
+Copyright: Linux SunRPC contributors (see file headers)
+License: GPL-2.0-only
+
+Files: vendor/ubuntu-7.0/net/sunrpc/Kconfig
+       vendor/ubuntu-7.0/net/sunrpc/Makefile
+Copyright: Linux SunRPC contributors (see file headers)
+License: GPL-2.0-only
+
+Files: vendor/ubuntu-7.0/include/linux/nfs_fs_sb.h
+       vendor/ubuntu-7.0/include/linux/nfs_xdr.h
+Copyright: Linux NFS subsystem contributors (see file headers)
+License: GPL-2.0-only
+
+Files: vendor/ubuntu-7.0/include/linux/sunrpc/sched.h
+       vendor/ubuntu-7.0/include/linux/sunrpc/clnt.h
+Copyright: 1995, 1996 Olaf Kirch
+           Linux SunRPC contributors (see file headers)
+License: GPL-2.0-only
+
+# ---------------------------------------------------------------------
 # Project glue (build / packaging / docs / scripts) — written for this
 # DKMS port. Kept GPL-2.0-only to remain compatible with the kernel
 # modules it produces.
@@ -101,6 +155,7 @@ Files: Makefile
        LICENSE
        .gitignore
        patches/series
+       patches/ubuntu-7.0/*.patch
 Copyright: 2026 enfs-dkms contributors
 License: GPL-2.0-only
 

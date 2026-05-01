@@ -35,13 +35,34 @@ The pinned upstream commit is recorded in
 vendor/openeuler/UPSTREAM-REVISION.
 
 ----------------------------------------------------------------------
-Project glue (everything outside vendor/openeuler/)
+Vendored upstream sources (vendor/ubuntu-7.0/)
+----------------------------------------------------------------------
+
+Sourced verbatim from the Ubuntu 26.04 LTS kernel source package
+linux_7.0.0-14.14 (the 14 stock Linux files that enfs needs to patch).
+These are vendored under GPL-2.0-only and each retains its original
+SPDX-License-Identifier and Linux kernel-author copyright header
+verbatim — Rick Sladkey, David Howells, Olaf Kirch and the wider
+Linux NFS / SunRPC subsystem contributors. Per-file copyrights are
+preserved exactly; this overview does not re-grant or amend them.
+
+Do not modify SPDX or copyright headers in any vendor/ubuntu-7.0/
+file.
+
+The pinned upstream package (Ubuntu kernel package and ABI) is
+recorded in vendor/ubuntu-7.0/UPSTREAM-REVISION
+(currently linux_7.0.0-14.14). The patches we apply on top live in
+patches/ubuntu-7.0/ and are listed by patches/ubuntu-7.0/series.
+
+----------------------------------------------------------------------
+Project glue (everything outside vendor/openeuler/ and vendor/ubuntu-7.0/)
 ----------------------------------------------------------------------
 
 Makefiles, Kbuild, dkms.conf.in, compat/, scripts/, debian/, docs/,
-patches/series, README, this file, etc. are written for this DKMS
-port and licensed GPL-2.0-only by enfs-dkms contributors. They are
-intentionally compatible with the kernel modules they produce.
+patches/series, patches/ubuntu-7.0/*.patch, README, this file, etc.
+are written for this DKMS port and licensed GPL-2.0-only by enfs-dkms
+contributors. They are intentionally compatible with the kernel
+modules they produce.
 
 debian/copyright contains file-glob-specific stanzas matching what is
 actually in each vendored file's header.

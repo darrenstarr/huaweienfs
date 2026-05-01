@@ -1,11 +1,47 @@
 # Porting notes — OpenEuler OLK-6.6 → Ubuntu 26.04 (kernel 7.0)
 
-This file is the running record of API drift between OpenEuler's
-`OLK-6.6` enfs sources (vendored in `vendor/openeuler/`) and the Ubuntu
-26.04 LTS kernel (`linux 7.0.0-14`, package `linux_7.0.0-14.14`).
+## Porting model
 
-When you discover new drift, **add a row** to the table and (if needed) a
-shim block to `compat/enfs_compat.h`. When you fix one, mark it ✅.
+We follow **Option B′**. The OpenEuler enfs feature is split into two
+classes of file: (a) wholly new files that have no upstream equivalent
+(`fs/nfs/enfs/`, `*_adapter.{c,h}`, `sunrpc_enfs_adapter.h`) and
+(b) edits to existing stock kernel files (`super.c`, `fs_context.c`,
+`nfs3xdr.c`, `internal.h`, `clnt.c`, `xprt.c`, the Kconfig/Makefile
+glue, and a handful of headers). Class (a) is taken verbatim from
+`vendor/openeuler/`. For class (b) we vendor the *stock Ubuntu 7.0*
+copy under `vendor/ubuntu-7.0/` and apply small focused patches from
+`patches/ubuntu-7.0/series` on top — never the OE copies. This keeps
+each patch reviewable, keeps refresh against new Ubuntu ABIs cheap
+(re-rebase the series), and means the user side only ever needs
+`linux-headers-*`.
+
+```mermaid
+flowchart LR
+    U["vendor/ubuntu-7.0/<br/>(stock, 14 files)"] --> Port
+    OE["vendor/openeuler/<br/>enfs/ + *_adapter.*"] --> Port
+    P["patches/ubuntu-7.0/<br/>series"] --> Port
+    Port(["make port"]) --> Src["src/"]
+    Src --> Build(["make modules<br/>(linux-headers-$KVER)"])
+    Build --> M["nfs.ko<br/>sunrpc.ko<br/>enfs.ko"]
+```
+
+See `docs/ARCHITECTURE.md` § Build pipeline for the full diagram.
+
+## Index of patches
+
+Current `patches/ubuntu-7.0/` series (in apply order):
+
+| # | Patch | Subject / purpose |
+|---|---|---|
+| 0001 | `0001-fs-nfs-Makefile-build-enfs.patch` | `fs/nfs/Makefile`: build `enfs_adapter.o` into `nfs.ko` and descend into `enfs/`. |
+| 0002 | `0002-net-sunrpc-Makefile-build-sunrpc_enfs_adapter.patch` | `net/sunrpc/Makefile`: link `sunrpc_enfs_adapter.o` into `sunrpc.ko`. |
+| 0003 | `0003-fs-nfs-Kconfig-add-CONFIG_ENFS.patch` | `fs/nfs/Kconfig`: add `CONFIG_ENFS` and `CONFIG_ENFS_KUNIT_TEST`. |
+| 0004 | `0004-net-sunrpc-Kconfig-add-CONFIG_SUNRPC_ENFS.patch` | `net/sunrpc/Kconfig`: add `CONFIG_SUNRPC_ENFS` (selected by `CONFIG_ENFS`). |
+| 0005 | `0005-include-sunrpc-clnt.h-add-multipath-fields.patch` | `include/linux/sunrpc/clnt.h`: add `cl_enfs` bitfield and `multipath_option` to `struct rpc_clnt`. |
+| 0006 | `0006-include-sunrpc-sched.h-add-RPC_TASK_ENFS.patch` | `include/linux/sunrpc/sched.h`: add `RPC_TASK_ENFS` (`0x0008`) and `RPC_TASK_FIXED` (rebased to `0x0020` because `0x0040` is now `RPC_TASK_NETUNREACH_FATAL` in 7.0). |
+
+Future patches will be appended here as they land. Keep one patch
+per file/feature — easy to review, easy to drop.
 
 ## Surface that needs porting
 
@@ -38,12 +74,19 @@ shim block to `compat/enfs_compat.h`. When you fix one, mark it ✅.
 | `include/linux/sunrpc/clnt.h` | 2 (`__GENKSYMS__` + per-CONFIG) | adds field on `rpc_clnt` |
 | `include/linux/sunrpc/sched.h` | 1 | adds field on `rpc_task` |
 
-## Kernel-version drift table (OLK-6.6 → 7.0.0-14)
+## Drift we encountered while writing the patches (OLK-6.6 → 7.0.0-14)
 
-Source: live diff against an extracted Ubuntu 26.04 kernel source tree
-(`linux 7.0.0-14.14`, package `linux_7.0.0-14.14.dsc`). For this
-project's reference deployment that tree lives on `<BUILD_HOST>` —
-see `secrets/beast.md`.
+Running record of API drift between OpenEuler's `OLK-6.6` enfs sources
+(in `vendor/openeuler/`) and the Ubuntu 26.04 LTS kernel
+(`linux 7.0.0-14`, vendored stock copies in `vendor/ubuntu-7.0/`).
+Each row is something we ran into while writing a
+`patches/ubuntu-7.0/*.patch` or a `compat/` shim. When you find new
+drift, **add a row** here and (if needed) a shim block to
+`compat/enfs_compat.h`. When you fix one, mark it ✅.
+
+Source: diff between `vendor/openeuler/` and `vendor/ubuntu-7.0/` in
+this tree, plus the live extracted Ubuntu kernel source on the build
+host (see `secrets/beast.md`).
 
 | Symbol / struct | OLK-6.6 | Ubuntu 7.0 | enfs impact | Status |
 |---|---|---|---|---|
