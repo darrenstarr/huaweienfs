@@ -51,6 +51,87 @@ struct rpc_xprt_switch;
 void xprt_switch_add_xprt_locked(struct rpc_xprt_switch *xps, struct rpc_xprt *xprt);
 
 /*
+ * NFS3PROC_EXTEND — patch 0012 defines this inside fs/nfs/nfs3xdr.c
+ * (because the UAPI header is out of scope to patch). enfs source
+ * (fs/nfs/enfs/exten_call.c) needs to see it too. Define here so both
+ * the encoder and the caller agree.
+ *
+ * Value matches OpenEuler's vendor/openeuler/include/uapi/linux/nfs3.h.
+ */
+#ifndef NFS3PROC_EXTEND
+#define NFS3PROC_EXTEND		22
+#endif
+
+/*
+ * rpc_clnt_test_xprt() / rpc_localalladdr() — OE-specific helpers used
+ * by enfs's path-monitor (fs/nfs/enfs/{enfs_proc,pm_ping}.c).
+ *
+ * For now, stub them out. The functionality affected is the
+ * enfs path-test ping and the localaddr enumeration that powers
+ * `localaddrs=` mount option binding to local NIC IPs. Without these
+ * stubs the build fails; with the stubs, those features are no-ops
+ * (mount still works against a remote-only multipath set).
+ *
+ * TODO: properly implement these by porting OE's versions into compat/
+ * or as additional patches against net/sunrpc/.
+ */
+struct rpc_clnt;
+struct sockaddr;
+static inline int enfs_compat_rpc_clnt_test_xprt(struct rpc_clnt *clnt,
+		struct rpc_xprt *xprt, void *ops, void *data, int flags)
+{
+	(void)clnt; (void)xprt; (void)ops; (void)data; (void)flags;
+	WARN_ONCE(1, "enfs: rpc_clnt_test_xprt stubbed");
+	return 0;
+}
+#define rpc_clnt_test_xprt(c, x, o, d, f) enfs_compat_rpc_clnt_test_xprt(c, x, o, d, f)
+
+static inline size_t enfs_compat_rpc_localalladdr(struct rpc_xprt *xprt,
+		struct sockaddr *buf, size_t buflen)
+{
+	(void)xprt; (void)buf; (void)buflen;
+	WARN_ONCE(1, "enfs: rpc_localalladdr stubbed");
+	return 0;
+}
+#define rpc_localalladdr(x, b, l) enfs_compat_rpc_localalladdr(x, b, l)
+
+/*
+ * Stubs for fs/nfs/enfs/shard_route.c functions. shard_route.o is
+ * dropped from the build (NLM-multipath needs lockd patches we haven't
+ * done yet). Other enfs files still call into shard.h; provide
+ * no-op stubs so the link succeeds.
+ */
+/* Use identifier-only #define so the symbols can also appear as
+ * function pointers (e.g. in init-table struct initializers in
+ * enfs_init.c). #define X(args) Y(args) breaks `&X` and `X` in
+ * non-call contexts. */
+static inline int enfs_compat_delete_clnt_shard_cache(struct rpc_clnt *clnt)
+{ (void)clnt; return 0; }
+#define enfs_delete_clnt_shard_cache enfs_compat_delete_clnt_shard_cache
+
+struct rpc_task;
+static inline void enfs_compat_shard_set_transport(struct rpc_task *t, struct rpc_clnt *c)
+{ (void)t; (void)c; }
+#define shard_set_transport enfs_compat_shard_set_transport
+
+static inline int enfs_compat_enfs_shard_init(void)
+{ return 0; }
+#define enfs_shard_init enfs_compat_enfs_shard_init
+
+static inline void enfs_compat_enfs_shard_exit(void)
+{ }
+#define enfs_shard_exit enfs_compat_enfs_shard_exit
+
+static inline void enfs_compat_enfs_query_xprt_shard(struct rpc_clnt *c, struct rpc_xprt *x)
+{ (void)c; (void)x; }
+#define enfs_query_xprt_shard enfs_compat_enfs_query_xprt_shard
+
+struct enfs_file_uuid;
+static inline void enfs_compat_enfs_print_uuid(struct enfs_file_uuid *u)
+{ (void)u; }
+#define enfs_print_uuid enfs_compat_enfs_print_uuid
+
+/*
  * rpc_xprt_switch_set_singular() — OE-specific. Configures the
  * xprt-iterator to "singular" mode (always return the same xprt).
  * Called by fs/nfs/enfs/enfs_roundrobin.c during failover-pinning.

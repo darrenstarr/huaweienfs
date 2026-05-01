@@ -1,0 +1,37 @@
+From: enfs-dkms
+Subject: [PATCH] sunrpc: export xprt_release + xprt_switch_get + rpc_xprt_switch_remove_xprt for enfs
+
+enfs.ko calls these three sunrpc helpers across module boundaries.
+Stock Ubuntu 7.0 keeps them un-exported (they're consumed only by the
+in-tree NFS client). Add EXPORT_SYMBOL_GPL.
+
+---
+--- a/net/sunrpc/xprt.c
++++ b/net/sunrpc/xprt.c
+@@ -1993,6 +1993,7 @@
+ 	else
+ 		xprt_free_bc_request(req);
+ }
++EXPORT_SYMBOL_GPL(xprt_release);
+ 
+ #ifdef CONFIG_SUNRPC_BACKCHANNEL
+ void
+
+--- a/net/sunrpc/xprtmultipath.c
++++ b/net/sunrpc/xprtmultipath.c
+@@ -91,6 +91,7 @@
+ 	spin_unlock(&xps->xps_lock);
+ 	xprt_put(xprt);
+ }
++EXPORT_SYMBOL_GPL(rpc_xprt_switch_remove_xprt);
+ 
+ /**
+  * rpc_xprt_switch_get_main_xprt - Get the 'main' xprt for an xprt switch.
+@@ -208,6 +209,7 @@
+ 		return xps;
+ 	return NULL;
+ }
++EXPORT_SYMBOL_GPL(xprt_switch_get);
+ 
+ /**
+  * xprt_switch_put - Release a reference to a rpc_xprt_switch

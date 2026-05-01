@@ -114,7 +114,7 @@ servers that don't speak the OE extension will reject these RPCs.
 +out:
 +	return error;
 +out_default:
-+	return nfs3_stat_to_errno(status);
++	return nfs_stat_to_errno(status);
 +}
 +#endif
 +

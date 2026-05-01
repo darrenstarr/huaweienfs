@@ -34,7 +34,10 @@ ccflags-y += -include $(src)/compat/enfs_compat.h
 # without them, optional fields disappear from struct nfs_client etc.
 ccflags-y += -DCONFIG_ENFS=1
 ccflags-y += -DCONFIG_SUNRPC_ENFS=1
-ccflags-y += -DCONFIG_NFS_LOCALIO=1
+# CONFIG_NFS_LOCALIO intentionally NOT defined: enabling it pulls in
+# references to the nfslocalio module (nfs_uuid_init, nfs_local_doio,
+# etc.) which lives outside our build. Without -D the related struct
+# fields disappear and the references go away.
 ccflags-y += -DCONFIG_NFS_FSCACHE=1
 ccflags-y += -DCONFIG_NFS_V3=1
 ccflags-y += -DCONFIG_NFS_V3_ACL=1
@@ -79,10 +82,19 @@ nfs-y := \
 	fs/nfs/pagelist.o fs/nfs/read.o fs/nfs/symlink.o fs/nfs/unlink.o \
 	fs/nfs/write.o fs/nfs/namespace.o fs/nfs/mount_clnt.o \
 	fs/nfs/nfstrace.o fs/nfs/export.o fs/nfs/sysfs.o \
-	fs/nfs/fs_context.o \
-	fs/nfs/nfsroot.o fs/nfs/sysctl.o fs/nfs/fscache.o \
-	fs/nfs/localio.o \
+	fs/nfs/fs_context.o fs/nfs/sysctl.o fs/nfs/fscache.o \
+	fs/nfs/nfs3xdr.o \
 	fs/nfs/enfs_adapter.o
+# nfs3xdr.o is normally part of nfsv3.ko (a separate module), but enfs
+# references nfs3_procedures[] across module boundaries, so we link it
+# into nfs.ko and export it from there. The exported symbol is added
+# by patch 0018.
+# Dropped from v0 (optional features that pull in symbols not exported
+# by stock Ubuntu sunrpc/nfslocalio):
+#   - fs/nfs/nfsroot.o  (NFS-on-root needs root_server_addr/path)
+#   - fs/nfs/localio.o  (localio fast-path needs the nfslocalio module)
+# Re-add them once the corresponding symbols are exported (would need
+# additional patches to fs/nfs/nfsroot or to vendor/import nfslocalio).
 
 # Per the in-tree Makefile, fs/nfs/nfstrace.c needs an -I to the dir
 # holding nfstrace.h so the kernel's trace-event mechanism finds the
@@ -118,6 +130,5 @@ fs/nfs/enfs/enfs-y := \
 	fs/nfs/enfs/enfs_rpc_init.o \
 	fs/nfs/enfs/enfs_rpc_proc.o \
 	fs/nfs/enfs/exten_call.o \
-	fs/nfs/enfs/shard_route.o \
 	fs/nfs/enfs/dns_process.o \
 	fs/nfs/enfs/enfs_lookup_cache.o

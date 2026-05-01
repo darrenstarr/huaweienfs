@@ -1,6 +1,3 @@
-# Patches applied (in order) on top of vendor/ubuntu-7.0/ to materialise
-# src/ under Option B′. One patch per line, processed by
-# scripts/build-src-tree.sh with `patch -p1`.
 0001-fs-nfs-Makefile-build-enfs.patch
 0002-net-sunrpc-Makefile-build-sunrpc_enfs_adapter.patch
 0003-fs-nfs-Kconfig-add-CONFIG_ENFS.patch
@@ -17,4 +14,5 @@
 0014-net-sunrpc-xprt-multipath-hooks.patch
 0015-fs-nfs-internal-add-include-guard.patch
 0016-net-sunrpc-clnt-export-rpc_task_get_next_xprt.patch
-0017-net-sunrpc-xprtmultipath-export-add_xprt_locked.patch
+0017-net-sunrpc-xprtmultipath-export-helpers-for-enfs.patch
+0018-sunrpc-nfs-export-helpers-for-enfs.patch
