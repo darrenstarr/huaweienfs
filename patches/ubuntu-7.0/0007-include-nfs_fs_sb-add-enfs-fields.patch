@@ -1,25 +1,19 @@
 From: enfs-dkms
-Subject: [PATCH] include/linux/nfs_fs_sb.h: add enfs fields and helpers
+Subject: [PATCH] include/linux/nfs_fs_sb.h: add enfs fields, hidden from genksyms
 
-Three additions, all guarded by CONFIG_ENFS:
+Three additions:
+  - struct nfs_client::cl_multipath_data
+  - struct nfs_server::enfs_flags
+  - static-inline refcount helpers nfsclient_refinc/refdec
 
-  1. struct nfs_client gains `cl_multipath_data` — opaque pointer to
-     the per-client `multipath_client_info` that enfs_multipath_client.c
-     manages. Populated by enfs_adapter when a client is created with
-     enfs_info=, NULL otherwise.
+All wrapped in `#if !defined(__GENKSYMS__) && IS_ENABLED(CONFIG_ENFS)`
+so genksyms generates the SAME CRCs for nfs.ko's exported symbols as
+stock Ubuntu — keeping unmodified consumers (nfs_acl, nfsd, lockd,
+nfsv3.ko, nfsv4.ko) loadable against our patched nfs.ko.
 
-  2. struct nfs_server gains `enfs_flags` — bitmap of
-     `ENFS_SERVER_FLAG_*` (see fs/nfs/enfs/enfs.h). enfs uses this to
-     track per-server multipath state.
-
-  3. Two static inlines `nfsclient_refinc` / `nfsclient_refdec` —
-     thin wrappers around `refcount_inc`/`refcount_dec` for the
-     `clp_count` field. enfs needs them to bump the refcount from its
-     out-of-tree code without poking refcount internals.
-
-Each block is appended at the natural insertion point in Ubuntu 7.0's
-file (which has different cap-bit numbering than OE 6.6, so we don't
-follow OE's exact placement).
+The new pointer/int fields sit AFTER the original last field in each
+struct so accesses by stock callers stay at correct offsets; only our
+patched code reaches the appended fields.
 
 ---
 --- a/include/linux/nfs_fs_sb.h
@@ -28,8 +22,8 @@ follow OE's exact placement).
  	struct list_head	pending_cb_stateids;
  	struct rcu_head		rcu;
  
-+#if IS_ENABLED(CONFIG_ENFS)
-+	void			*cl_multipath_data; /* struct multipath_client_info * */
++#if !defined(__GENKSYMS__) && IS_ENABLED(CONFIG_ENFS)
++	void			*cl_multipath_data; /* hidden from genksyms */
 +#endif
  #if IS_ENABLED(CONFIG_NFS_LOCALIO)
  	struct timespec64	cl_nfssvc_boot;
@@ -38,19 +32,22 @@ follow OE's exact placement).
  	bool			has_sec_mnt_opts;
  	struct kobject		kobj;
  	struct rcu_head		rcu;
-+#if IS_ENABLED(CONFIG_ENFS)
-+	int			enfs_flags;	/* ENFS_SERVER_FLAG_xx (fs/nfs/enfs/enfs.h) */
++#if !defined(__GENKSYMS__) && IS_ENABLED(CONFIG_ENFS)
++	int			enfs_flags;	/* hidden from genksyms */
 +#endif
  };
  
  /* Server capabilities */
-@@ -331,4 +337,17 @@
+@@ -331,4 +337,20 @@
  #define NFS_CAP_READ_PLUS	(1U << 29)
  #define NFS_CAP_FS_LOCATIONS	(1U << 30)
  #define NFS_CAP_MOVEABLE	(1U << 31)
 +
-+#if IS_ENABLED(CONFIG_ENFS)
-+/* Refcount helpers used by out-of-tree enfs sources to bump clp_count. */
++#if !defined(__GENKSYMS__) && IS_ENABLED(CONFIG_ENFS)
++/* Hidden from genksyms: these helpers are inline-only and don't appear
++ * as exported symbols, so the only "CRC" effect would be through
++ * function-signature mention — which doesn't apply to static inlines.
++ * Still wrap for symmetry with the struct additions above. */
 +static inline void nfsclient_refinc(refcount_t *ref_count)
 +{
 +	refcount_inc(ref_count);

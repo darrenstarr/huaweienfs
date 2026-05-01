@@ -49,9 +49,11 @@ ccflags-y += -DCONFIG_SUNRPC_ENFS=1
 # (a) in the project plan), this build supports NFSv3 client multipath
 # without ACLs or file locking.
 ccflags-y += -DCONFIG_NFS_V3=1
-# CONFIG_NFS_V3_ACL → drops nfsacl_{encode,decode} dep on nfs_acl.ko
-# CONFIG_NFS_V4 → drops nlmclnt_* dep on lockd.ko
-# CONFIG_NFS_FSCACHE → drops __fscache_* dep on fscache.ko
+ccflags-y += -DCONFIG_NFS_V3_ACL=1
+ccflags-y += -DCONFIG_NFS_V4=1
+ccflags-y += -DCONFIG_NFS_V4_1=1
+ccflags-y += -DCONFIG_NFS_V4_2=1
+ccflags-y += -DCONFIG_NFS_FSCACHE=1
 ccflags-y += -DCONFIG_SUNRPC_BACKCHANNEL=1
 ccflags-y += -DCONFIG_SUNRPC_DEBUG=1
 
@@ -114,6 +116,27 @@ nfs-y := \
 # future when we add NFSv4 multipath).
 CFLAGS_fs/nfs/nfstrace.o += -I$(src)/fs/nfs
 CFLAGS_fs/nfs/nfs4trace.o += -I$(src)/fs/nfs
+
+# ---------------------------------------------------------------------
+# lockd.ko — stock NLM lock manager. Rebuilt against our patched
+# sunrpc.ko so its CRCs line up. nfs.ko depends on this for byte-range
+# locking (nlmclnt_*).
+# ---------------------------------------------------------------------
+obj-m += fs/lockd/lockd.o
+fs/lockd/lockd-y := \
+	fs/lockd/clntlock.o fs/lockd/clntproc.o fs/lockd/clntxdr.o \
+	fs/lockd/host.o fs/lockd/svc.o fs/lockd/svclock.o \
+	fs/lockd/svcshare.o fs/lockd/svcproc.o fs/lockd/svcsubs.o \
+	fs/lockd/mon.o fs/lockd/trace.o fs/lockd/xdr.o fs/lockd/netlink.o \
+	fs/lockd/clnt4xdr.o fs/lockd/xdr4.o fs/lockd/svc4proc.o \
+	fs/lockd/procfs.o
+CFLAGS_fs/lockd/trace.o += -I$(src)/fs/lockd
+
+# ---------------------------------------------------------------------
+# nfs_acl.ko — NFSv3 ACL XDR (also rebuilt for CRC alignment).
+# ---------------------------------------------------------------------
+obj-m += fs/nfs_common/nfs_acl.o
+fs/nfs_common/nfs_acl-y := fs/nfs_common/nfsacl.o
 
 # ---------------------------------------------------------------------
 # enfs.ko — the standalone multipath module from vendor/openeuler/.
