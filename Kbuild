@@ -38,12 +38,20 @@ ccflags-y += -DCONFIG_SUNRPC_ENFS=1
 # references to the nfslocalio module (nfs_uuid_init, nfs_local_doio,
 # etc.) which lives outside our build. Without -D the related struct
 # fields disappear and the references go away.
-ccflags-y += -DCONFIG_NFS_FSCACHE=1
+# CONFIG_NFS_FSCACHE intentionally NOT defined: needs fscache.ko +
+# netfs symbols (__fscache_*) which are CRC-locked against stock
+# sunrpc.ko's CRC of struct rpc_clnt — replacing sunrpc.ko forces
+# fscache to be unloaded which may not be feasible. Defer to v1.
+# CONFIG_NFS_V3_ACL intentionally NOT defined: needs nfs_acl.ko which
+# is built against stock sunrpc CRCs.
+# CONFIG_NFS_V4 paths that use lockd are similar — lockd.ko is built
+# against stock CRCs. Until we vendor + rebuild lockd/nfs_acl (option
+# (a) in the project plan), this build supports NFSv3 client multipath
+# without ACLs or file locking.
 ccflags-y += -DCONFIG_NFS_V3=1
-ccflags-y += -DCONFIG_NFS_V3_ACL=1
-ccflags-y += -DCONFIG_NFS_V4=1
-ccflags-y += -DCONFIG_NFS_V4_1=1
-ccflags-y += -DCONFIG_NFS_V4_2=1
+# CONFIG_NFS_V3_ACL → drops nfsacl_{encode,decode} dep on nfs_acl.ko
+# CONFIG_NFS_V4 → drops nlmclnt_* dep on lockd.ko
+# CONFIG_NFS_FSCACHE → drops __fscache_* dep on fscache.ko
 ccflags-y += -DCONFIG_SUNRPC_BACKCHANNEL=1
 ccflags-y += -DCONFIG_SUNRPC_DEBUG=1
 
