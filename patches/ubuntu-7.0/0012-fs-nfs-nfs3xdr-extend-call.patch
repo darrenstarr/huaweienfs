@@ -1,0 +1,133 @@
+From: enfs-dkms
+Subject: [PATCH] fs/nfs/nfs3xdr.c: NFSv3 EXTEND XDR + PROC table entry
+
+Adds the OpenEuler "extended call" NFSv3 op end-to-end:
+
+  - Local includes / defines: pull in the new struct nfs_extend_xdr_arg
+    via <linux/nfs_xdr.h>, define EXTEND_CMD_MAX_BUF_LEN (800K), and
+    define NFS3PROC_EXTEND (22) inline if the UAPI header doesn't ship
+    it. The latter is the case on stock Ubuntu 7.0 — we'd otherwise
+    have to also patch include/uapi/linux/nfs3.h, which is uapi
+    territory we'd prefer not to touch.
+
+  - Two size macros (NFS3_extendargs_sz, NFS3_extendres_sz) so the
+    PROC() macro expands to the right p_arglen / p_replen.
+
+  - nfs3_xdr_enc_extend3args(): encode the opaque payload (length-
+    prefixed, byte-array). enfs.ko populates the buffer in
+    fs/nfs/enfs/exten_call.c.
+
+  - nfs3_xdr_dec_extend3res(): decode the response — NFS3 status word,
+    then a length-prefixed opaque payload, bounds-checked against
+    decArg->maxsize.
+
+  - Wire into the nfs3_procedures[] table with PROC(EXTEND, extend,
+    extend, 0) — slot index NFS3PROC_EXTEND.
+
+All under CONFIG_ENFS. Compat risk noted in patch 0008 still applies:
+servers that don't speak the OE extension will reject these RPCs.
+
+---
+--- a/fs/nfs/nfs3xdr.c
++++ b/fs/nfs/nfs3xdr.c
+@@ -25,6 +25,13 @@
+ 
+ #include "internal.h"
+ #include "nfstrace.h"
++#if IS_ENABLED(CONFIG_ENFS)
++#include <linux/nfs_xdr.h>
++#define EXTEND_CMD_MAX_BUF_LEN 819200 /* 800K */
++#ifndef NFS3PROC_EXTEND
++#define NFS3PROC_EXTEND		22	/* enfs-extension; not in stock UAPI nfs3.h */
++#endif
++#endif
+ 
+ #define NFSDBG_FACILITY		NFSDBG_XDR
+ 
+@@ -64,6 +71,9 @@
+ #define NFS3_readdirargs_sz	(NFS3_fh_sz+NFS3_cookieverf_sz+3)
+ #define NFS3_readdirplusargs_sz	(NFS3_fh_sz+NFS3_cookieverf_sz+4)
+ #define NFS3_commitargs_sz	(NFS3_fh_sz+3)
++#if IS_ENABLED(CONFIG_ENFS)
++#define NFS3_extendargs_sz	(4 + XDR_QUADLEN(EXTEND_CMD_MAX_BUF_LEN))
++#endif
+ 
+ #define NFS3_getattrres_sz	(1+NFS3_fattr_sz)
+ #define NFS3_setattrres_sz	(1+NFS3_wcc_data_sz)
+@@ -81,6 +91,9 @@
+ #define NFS3_fsinfores_sz	(1+NFS3_post_op_attr_sz+12)
+ #define NFS3_pathconfres_sz	(1+NFS3_post_op_attr_sz+6)
+ #define NFS3_commitres_sz	(1+NFS3_wcc_data_sz+2)
++#if IS_ENABLED(CONFIG_ENFS)
++#define NFS3_extendres_sz	(1 + 4 + XDR_QUADLEN(EXTEND_CMD_MAX_BUF_LEN))
++#endif
+ 
+ #define ACL3_getaclargs_sz	(NFS3_fh_sz+1)
+ #define ACL3_setaclargs_sz	(NFS3_fh_sz+1+ \
+@@ -2449,6 +2462,56 @@
+ 	.p_name      = #proc,						\
+ 	}
+ 
++#if IS_ENABLED(CONFIG_ENFS)
++static void nfs3_xdr_enc_extend3args(struct rpc_rqst *req,
++	struct xdr_stream *xdr, const void *data)
++{
++	const struct nfs_extend_xdr_arg *encArg = data;
++	__be32 *p;
++
++	WARN_ON_ONCE(encArg->buflen > EXTEND_CMD_MAX_BUF_LEN);
++	p = xdr_reserve_space(xdr, 4 + encArg->buflen);
++	xdr_encode_opaque(p, encArg->pBuf, encArg->buflen);
++}
++
++static int nfs3_xdr_dec_extend3res(struct rpc_rqst *req,
++	struct xdr_stream *xdr, void *result)
++{
++	enum nfs_stat status;
++	int error;
++	struct nfs_extend_xdr_arg *decArg = result;
++	int length;
++	__be32 *p;
++
++	error = decode_nfsstat3(xdr, &status);
++	if (unlikely(error))
++		goto out;
++	if (status != NFS3_OK)
++		goto out_default;
++
++	memset(decArg->pBuf, '\0', decArg->maxsize);
++	p = xdr_inline_decode(xdr, 4);
++	if (unlikely(!p))
++		return -EIO;
++	length = be32_to_cpup(p++);
++	if (unlikely(length > decArg->maxsize)) {
++		dprintk("NFS: extend response (%u) > max_size (%d)\n",
++			length, decArg->maxsize);
++		return -E2BIG;
++	}
++	p = xdr_inline_decode(xdr, length);
++	if (unlikely(!p))
++		return -EIO;
++	decArg->buflen = length;
++	memcpy(decArg->pBuf, p, decArg->buflen);
++	dprintk("NFS: extend response size (%u)\n", length);
++out:
++	return error;
++out_default:
++	return nfs3_stat_to_errno(status);
++}
++#endif
++
+ const struct rpc_procinfo nfs3_procedures[] = {
+ 	PROC(GETATTR,		getattr,	getattr,	1),
+ 	PROC(SETATTR,		setattr,	setattr,	0),
+@@ -2471,6 +2534,9 @@
+ 	PROC(FSINFO,		getattr,	fsinfo,		0),
+ 	PROC(PATHCONF,		getattr,	pathconf,	0),
+ 	PROC(COMMIT,		commit,		commit,		5),
++#if IS_ENABLED(CONFIG_ENFS)
++	PROC(EXTEND,		extend,		extend,		0),
++#endif
+ };
+ 
+ static unsigned int nfs_version3_counts[ARRAY_SIZE(nfs3_procedures)];
