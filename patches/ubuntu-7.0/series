@@ -16,3 +16,5 @@
 0013-net-sunrpc-clnt-multipath-hooks.patch
 0014-net-sunrpc-xprt-multipath-hooks.patch
 0015-fs-nfs-internal-add-include-guard.patch
+0016-net-sunrpc-clnt-export-rpc_task_get_next_xprt.patch
+0017-net-sunrpc-xprtmultipath-export-add_xprt_locked.patch
