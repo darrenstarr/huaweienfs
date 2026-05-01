@@ -1,38 +1,64 @@
 From: enfs-dkms
-Subject: [PATCH] include/linux/sunrpc/sched.h: add RPC_TASK_ENFS / RPC_TASK_FIXED
+Subject: [PATCH] include/linux/sunrpc/sched.h: widen tk_flags + add RPC_TASK_ENFS / RPC_TASK_FIXED
 
-OpenEuler's enfs claims two RPC_TASK_* flag bits to mark tasks that go
-through the enfs dispatch path:
+OpenEuler's enfs needs two new RPC_TASK_* flag bits on rpc_task:
 
-  - RPC_TASK_ENFS (0x0008) — task dispatched from the enfs subsystem.
-    0x0008 was free in OE 6.6 and remains free in Ubuntu 7.0.
-  - RPC_TASK_FIXED — used by enfs's path-monitor (pm_ping.c) and
-    failover paths to mark tasks that should not be re-routed.
+  - RPC_TASK_ENFS  — task dispatched from the enfs subsystem
+  - RPC_TASK_FIXED — task pinned to its current xprt by enfs path-monitor
+                     / failover code (pm_ping.c, failover_path.c)
 
-OE picked 0x0040 for RPC_TASK_FIXED in 6.6, but **0x0040 is now taken
-by RPC_TASK_NETUNREACH_FATAL** in Ubuntu 7.0 (added by mainline post-
-6.6). We therefore relocate RPC_TASK_FIXED to **0x0020**, which is
-free in 7.0, and document the rebased bit in
-docs/changes/06-task-flags.md so future readers don't grep for 0x0040
-and get confused.
+OE 6.6 used 0x0008 and 0x0040 respectively. **Neither is a free choice
+in Ubuntu 7.0:**
 
-The references to RPC_TASK_FIXED in enfs source are all symbolic
-(no numeric literal anywhere — verified with `grep -rn 0x0040
-fs/nfs/enfs/`), so this rebase is safe.
+  - 0x0008 happens to still be free in 7.0 (verified: only RPC_TASK_*
+    flag missing from the full 0x0001–0x8000 enumeration in the stock
+    file). RPC_TASK_ENFS gets that one.
+  - 0x0040 is now `RPC_TASK_NETUNREACH_FATAL` in 7.0.
+  - 0x0020 is `RPC_CALL_MAJORSEEN` (also stored in tk_flags).
+  - 0x0100 is `RPC_TASK_NO_ROUND_ROBIN`.
+  - Every other bit 0x0001–0x8000 in tk_flags is consumed.
+
+So all 15 of the stock 16-bit positions are taken except the one we
+claim for ENFS. RPC_TASK_FIXED has nowhere to go inside the original
+`unsigned short` field.
+
+**Fix:** widen `tk_flags` from `unsigned short` to `unsigned int`. The
+lower 16 bits remain identical to stock (every stock define keeps its
+value, every accessor macro keeps working), and we put RPC_TASK_FIXED
+in the upper 16 (0x00010000) where no collision is possible. enfs
+source uses both flags symbolically (verified `grep -rn 0x0040
+fs/nfs/enfs/` returns nothing), so the bit-position change is
+transparent to the OE code.
+
+The struct grows by ≤ 4 bytes (often 0 after alignment). This changes
+the symbol CRC of any sunrpc export whose signature mentions rpc_task,
+which means nfsd.ko / lockd.ko / nfs_acl.ko built against stock
+sched.h would refuse to load against our patched sunrpc.ko — but those
+modules are already going to be rebuilt as part of the DKMS package
+(see project task #17 / dkms.conf.in).
 
 ---
- include/linux/sunrpc/sched.h | 5 +++++
- 1 file changed, 5 insertions(+)
+ include/linux/sunrpc/sched.h | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
 
 --- a/include/linux/sunrpc/sched.h
 +++ b/include/linux/sunrpc/sched.h
+@@ -93,7 +93,7 @@ struct rpc_task {
+ 	int			tk_status;	/* result of last operation */
+ 	struct list_head	tk_task;	/* global list of tasks */
+
+-	unsigned short		tk_flags;	/* misc flags */
++	unsigned int		tk_flags;	/* misc flags (widened by enfs to fit RPC_TASK_FIXED in upper 16) */
+ 	unsigned short		tk_timeouts;	/* maj timeouts */
+
+ #if IS_ENABLED(CONFIG_SUNRPC_BACKCHANNEL)
 @@ -144,6 +144,11 @@ struct rpc_task_setup {
  #define RPC_TASK_NO_RETRANS_TIMEOUT	0x4000		/* wait forever for a reply */
  #define RPC_TASK_CRED_NOREF	0x8000		/* No refcount on the credential */
 
 +#if IS_ENABLED(CONFIG_SUNRPC_ENFS)
-+#define RPC_TASK_FIXED		0x0020		/* enfs: pinned to its current xprt (rebased from OE's 0x0040 — collides w/ RPC_TASK_NETUNREACH_FATAL on 7.0) */
-+#define RPC_TASK_ENFS		0x0008		/* enfs: dispatched by the enfs subsystem */
++#define RPC_TASK_ENFS		0x00000008	/* enfs: dispatched by the enfs subsystem (matches OE) */
++#define RPC_TASK_FIXED		0x00010000	/* enfs: pinned to its current xprt (rebased from OE's 0x0040 — collides w/ RPC_TASK_NETUNREACH_FATAL on 7.0; needs widened tk_flags) */
 +#endif
 +
  #define RPC_IS_ASYNC(t)		((t)->tk_flags & RPC_TASK_ASYNC)

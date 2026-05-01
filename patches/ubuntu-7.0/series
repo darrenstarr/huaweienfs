@@ -1,0 +1,9 @@
+# Patches applied (in order) on top of vendor/ubuntu-7.0/ to materialise
+# src/ under Option B′. One patch per line, processed by
+# scripts/build-src-tree.sh with `patch -p1`.
+0001-fs-nfs-Makefile-build-enfs.patch
+0002-net-sunrpc-Makefile-build-sunrpc_enfs_adapter.patch
+0003-fs-nfs-Kconfig-add-CONFIG_ENFS.patch
+0004-net-sunrpc-Kconfig-add-CONFIG_SUNRPC_ENFS.patch
+0005-include-sunrpc-clnt.h-add-multipath-fields.patch
+0006-include-sunrpc-sched.h-add-RPC_TASK_ENFS.patch

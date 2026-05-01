@@ -11,7 +11,11 @@ KDIR          ?= /lib/modules/$(KVER)/build
 DKMS_TREE     ?= /var/lib/dkms
 PROJECT       := enfs
 SRC_DIR       := $(CURDIR)/src
-VENDOR_DIR    := $(CURDIR)/vendor/openeuler
+# Option B′: stock Ubuntu source + patches + OE-only new files + compat.
+UBUNTU_VENDOR_DIR := $(CURDIR)/vendor/ubuntu-7.0
+OE_VENDOR_DIR     := $(CURDIR)/vendor/openeuler
+PATCHES_DIR       := $(CURDIR)/patches/ubuntu-7.0
+COMPAT_DIR        := $(CURDIR)/compat
 # VM_HOST and VM_PATH are intentionally unset by default — set them in
 # your shell, in secrets/local-env.sh (gitignored), or on the command
 # line, e.g.:
@@ -25,8 +29,9 @@ VM_PATH       ?= /home/ubuntu/enfs-dkms
 help:
 	@echo "enfs-dkms — developer targets:"
 	@echo
-	@echo "  make port              Run scripts/apply-compat-shims.sh to populate src/"
-	@echo "                         from vendor/openeuler/ + compat/ + patches/"
+	@echo "  make port              Run scripts/build-src-tree.sh to populate src/"
+	@echo "                         from vendor/ubuntu-7.0/ + patches/ubuntu-7.0/"
+	@echo "                         + vendor/openeuler/ (OE-only files) + compat/"
 	@echo "  make modules           Out-of-tree kernel build against KDIR=$(KDIR)"
 	@echo "  make clean             Remove build artefacts"
 	@echo
@@ -45,7 +50,12 @@ help:
 
 .PHONY: port
 port:
-	@scripts/apply-compat-shims.sh "$(VENDOR_DIR)" "$(SRC_DIR)" "$(CURDIR)/compat" "$(CURDIR)/patches"
+	@scripts/build-src-tree.sh \
+	    "$(UBUNTU_VENDOR_DIR)" \
+	    "$(OE_VENDOR_DIR)" \
+	    "$(PATCHES_DIR)" \
+	    "$(COMPAT_DIR)" \
+	    "$(SRC_DIR)"
 
 .PHONY: modules
 modules: port

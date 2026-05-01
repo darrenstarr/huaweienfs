@@ -1,3 +1,8 @@
-# Patches applied (in order) by scripts/apply-compat-shims.sh on top of
-# the vendored OpenEuler tree to materialise src/. Each line is a path
-# relative to this directory; '#' is a comment. None yet.
+# Top-level patches/series is no longer used.
+#
+# Under Option B′ the active patch series lives at:
+#   patches/ubuntu-7.0/series
+#
+# It lists the patches applied on top of vendor/ubuntu-7.0/ by
+# scripts/build-src-tree.sh (invoked from `make port`). This file is
+# kept only as a pointer for anyone landing here from old docs.
