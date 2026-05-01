@@ -1,0 +1,6 @@
+# Lintian overrides for the enfs-dkms binary package.
+#
+# initial-upload-closes-no-bugs: this package is not yet uploaded to a
+# Debian/Ubuntu archive, so there is no bug tracker entry to close in
+# the changelog. Will go away when the project gets a bug tracker.
+enfs-dkms: initial-upload-closes-no-bugs

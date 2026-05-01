@@ -1,25 +1,44 @@
 #!/usr/bin/make -f
-# debian/rules for enfs-dkms - source-only DKMS package.
+# debian/rules for enfs-dkms — source-only DKMS package.
+#
+# We ship the project tree under /usr/src/enfs-<ver>/ and let DKMS
+# rebuild from source via the PRE_BUILD hook on every kernel update.
+
+include /usr/share/dpkg/pkg-info.mk
 
 DKMS_SRC = $(CURDIR)/debian/enfs-dkms/usr/src/enfs-$(DEB_VERSION_UPSTREAM)
 
 %:
-	dh $@
+	dh $@ --with dkms
 
 override_dh_auto_build:
 	# DKMS modules don't build at packaging time; the kernel build
-	# happens on the user's machine via DKMS. Do generate dkms.conf
-	# from the template so it can be installed.
+	# happens on the user's machine via DKMS. Generate dkms.conf
+	# from the template so it ships with the right version.
 	sed 's|@VERSION@|$(DEB_VERSION_UPSTREAM)|g' dkms.conf.in > dkms.conf
 
 override_dh_auto_install:
-	# Stage the source tree into the dkms layout.
 	mkdir -p $(DKMS_SRC)
-	cp -a vendor src compat patches scripts Kbuild Makefile dkms.conf README.md LICENSE \
-	    docs $(DKMS_SRC)/
-	# `dh_dkms -V $(DEB_VERSION_UPSTREAM)` (in dh_dkms) will then
-	# register the package with DKMS at install time.
+	# Stage what DKMS needs to rebuild against any kernel:
+	#   vendor/    Ubuntu + OpenEuler kernel sources we patch
+	#   patches/   patch series applied at PRE_BUILD time
+	#   compat/    kernel-version shim header
+	#   scripts/   build-src-tree.sh + dkms-pre-build.sh + sync helpers
+	#   Kbuild     top-level out-of-tree build entry
+	#   Makefile   (informational; DKMS calls $(MAKE) directly via dkms.conf)
+	#   dkms.conf  generated above
+	#   README, LICENSE, docs/  (small, useful for inspecting the staged tree)
+	#
+	# Explicitly NOT shipped:
+	#   src/       (regenerated each rebuild by the PRE_BUILD hook)
+	#   debian/    (already installed via dpkg, would be circular)
+	#   secrets/, CLAUDE.md, .git, .github/  (developer state)
+	#   any *.ko / *.o / Module.symvers (build artefacts)
+	cp -a vendor patches compat scripts Kbuild Makefile dkms.conf \
+	      README.md LICENSE docs $(DKMS_SRC)/
+	# dh_dkms (added via `--with dkms` above) registers the package
+	# at install time using debian/enfs-dkms.dkms.
 
 override_dh_auto_clean:
 	rm -f dkms.conf
-	rm -rf src/.build-stamp
+	rm -rf $(CURDIR)/src/.build-stamp
