@@ -31,11 +31,16 @@ remove` cleanly restores the in-tree NFS client.
 
 Currently working end-to-end on:
 
-| Ubuntu | Kernel       | Notes                              |
-|--------|--------------|------------------------------------|
-| 26.04  | 7.0.x        | GA target                          |
-| 24.04  | 6.14 HWE     | works after one-time initramfs rebuild |
-| 24.04  | 6.8 GA       | works                              |
+| Ubuntu          | Kernel       | Status                                  |
+|-----------------|--------------|-----------------------------------------|
+| **26.04 LTS**   | 7.0.x        | GA target — `apt install` then `modprobe enfs` and you're done |
+| **24.04 LTS HWE** | 6.14.x     | works after a one-time `dkms install --force` + `update-initramfs -u` + reboot (see release notes) |
+| **24.04 LTS GA**  | 6.8.x      | works after the same one-time post-install step |
+
+Architectures: `amd64` (x86_64). aarch64 build coverage is on the
+roadmap. Each tagged release publishes a `.deb` to the
+[releases page](https://github.com/darrenstarr/huaweienfs/releases);
+read the release notes for kernel-specific install steps.
 
 ## Quick start
 
