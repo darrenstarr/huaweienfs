@@ -1,3 +1,14 @@
+enfs-dkms (0.1.5-1) noble; urgency=medium
+
+  * Architecture: all — DKMS source-only package, one .deb works on
+    both amd64 and arm64. Previously the package metadata claimed
+    `amd64 arm64` as if it were two separate binaries.
+  * CI now builds for arm64 too (under QEMU + binfmt for both 6.8
+    and 6.14 targets). The release artefact is a single
+    `enfs-dkms_0.1.5-1_all.deb`.
+
+ -- Darren <darren@example.invalid>  Sat, 02 May 2026 14:00:00 +0200
+
 enfs-dkms (0.1.4-1) noble; urgency=medium
 
   * Postinst now does the manual steps that 0.1.3 forced users to

@@ -45,19 +45,21 @@ jobs:
 
             This release builds and loads end-to-end on:
 
-            | Ubuntu          | Kernel series | Status                                  |
-            |-----------------|---------------|------------------------------------------|
-            | **26.04 LTS**   | 7.0.x         | GA target                                |
-            | **24.04 LTS HWE** | 6.14.x      | works (one-time `update-initramfs -u` after first install) |
-            | **24.04 LTS GA**  | 6.8.x       | works                                    |
+            | Ubuntu            | Kernel series | amd64 | arm64 |
+            |-------------------|---------------|-------|-------|
+            | **26.04 LTS**     | 7.0.x         | ✓ GA  | ✓ CI-built (untested on hardware) |
+            | **24.04 LTS HWE** | 6.14.x        | ✓     | ✓ CI-built (untested on hardware) |
+            | **24.04 LTS GA**  | 6.8.x         | ✓     | ✓ CI-built (untested on hardware) |
 
-            Architectures: `amd64` (x86_64). aarch64 build coverage is
-            on the roadmap.
+            The .deb is `Architecture: all` — DKMS does the per-kernel,
+            per-arch compile on the user's machine using their installed
+            `linux-headers-*`. One .deb works on amd64 *and* arm64.
 
             ## Install
 
             ```bash
-            sudo apt install ./enfs-dkms_*.deb
+            sudo apt install ./enfs-dkms_*_all.deb
+            sudo reboot                # required so DKMS modules load at boot
             sudo modprobe enfs
             ```
 
