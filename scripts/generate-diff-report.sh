@@ -21,6 +21,8 @@
 
 set -euo pipefail
 
+# shellcheck disable=SC2034  # OE captures arg $1 for validation; used once
+                              # the commented-out vs-OE-base diff block is wired up
 OE="${1:?path to OpenEuler kernel checkout, possibly remote (host:path)}"
 UB="${2:?path to extracted Ubuntu kernel source, possibly remote}"
 HERE="$(cd "$(dirname "$0")"/.. && pwd)"

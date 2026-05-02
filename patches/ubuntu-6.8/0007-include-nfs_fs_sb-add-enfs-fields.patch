@@ -1,0 +1,53 @@
+From: enfs-dkms
+Subject: [PATCH] include/linux/nfs_fs_sb.h: add enfs fields, hidden from genksyms (6.8 variant)
+
+Same as the 7.0 patch, but rebased for 6.8 where struct nfs_client
+ends right after `struct rcu_head rcu` (no LOCALIO block follows in
+6.8) so cl_multipath_data goes immediately before the closing brace.
+
+Cap-bit numbering matches 7.0 for NFS_CAP_MOVEABLE (1U << 31), so the
+refcount helpers slot in at the same position (after MOVEABLE, before
+the file's closing #endif).
+
+---
+--- a/include/linux/nfs_fs_sb.h
++++ b/include/linux/nfs_fs_sb.h
+@@ -125,6 +125,9 @@
+ 	struct net		*cl_net;
+ 	struct list_head	pending_cb_stateids;
+ 	struct rcu_head		rcu;
++#if !defined(__GENKSYMS__) && IS_ENABLED(CONFIG_ENFS)
++	void			*cl_multipath_data; /* hidden from genksyms */
++#endif
+ };
+ 
+ /*
+@@ -283,6 +286,9 @@
+ 	bool			has_sec_mnt_opts;
+ 	struct kobject		kobj;
+ 	struct rcu_head		rcu;
++#if !defined(__GENKSYMS__) && IS_ENABLED(CONFIG_ENFS)
++	int			enfs_flags;	/* hidden from genksyms */
++#endif
+ };
+ 
+ /* Server capabilities */
+@@ -312,4 +318,18 @@
+ #define NFS_CAP_READ_PLUS	(1U << 29)
+ #define NFS_CAP_FS_LOCATIONS	(1U << 30)
+ #define NFS_CAP_MOVEABLE	(1U << 31)
++
++#if !defined(__GENKSYMS__) && IS_ENABLED(CONFIG_ENFS)
++/* Inline-only refcount helpers — no exported symbols, so no CRC effect.
++ * Wrapped for symmetry with the struct additions above. */
++static inline void nfsclient_refinc(refcount_t *ref_count)
++{
++	refcount_inc(ref_count);
++}
++
++static inline void nfsclient_refdec(refcount_t *ref_count)
++{
++	refcount_dec(ref_count);
++}
++#endif
+ #endif

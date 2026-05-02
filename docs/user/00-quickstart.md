@@ -88,7 +88,7 @@ If the path table only lists *one* line, jump to
 
 Add to `/etc/fstab`:
 
-```
+```text
 10.0.0.10:/your_export  /mnt/storage  nfs  vers=3,nolock,remoteaddrs=10.0.0.10~10.0.0.11~10.0.0.12,_netdev  0  0
 ```
 

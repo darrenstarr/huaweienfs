@@ -34,7 +34,15 @@
 #define NFSDBG_ENFS	0x10000
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+/*
+ * Shims below apply to every kernel target we currently support
+ * (Ubuntu 6.8, 6.11, 6.14, 7.0). Each helper either declares a
+ * function our patches export (so the upstream header doesn't need to
+ * change), or stubs an OpenEuler-only helper that has no Ubuntu
+ * equivalent. None of them clash with stock Ubuntu symbols on any
+ * supported version, so a single block covers all targets.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
 
 #include <linux/sunrpc/clnt.h>
 #include <linux/sunrpc/xprtmultipath.h>
@@ -146,9 +154,10 @@ static inline void enfs_compat_rpc_xprt_switch_set_singular(struct rpc_xprt_swit
 
 /*
  * xprt_iter_get_xprt() — OE returns the current xprt pointed to by
- * the cursor *without advancing*. Stock Ubuntu only exposes
- * xprt_iter_get_next() (advance + return). We approximate by calling
- * get_next; the semantic difference (one extra advance per call) may
+ * the cursor *without advancing*. Ubuntu 6.8 still ships this helper
+ * (declared & exported via our patch). Ubuntu 6.14 and 7.0 dropped it
+ * in favour of the advance-only xprt_iter_get_next(); we approximate
+ * it here. The semantic difference (one extra advance per call) may
  * shift load slightly but does not break correctness because the
  * iterator is round-robin and enfs only cares about *some* live
  * transport, not specifically the "current" one.
@@ -156,12 +165,14 @@ static inline void enfs_compat_rpc_xprt_switch_set_singular(struct rpc_xprt_swit
  * TODO: if a benchmark shows noticeable load imbalance, revisit by
  * porting OE's xprt_iter_get_helper() into compat/.
  */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 static inline struct rpc_xprt *enfs_compat_xprt_iter_get_xprt(struct rpc_xprt_iter *xpi)
 {
 	return xprt_iter_get_next(xpi);
 }
 #define xprt_iter_get_xprt(xpi) enfs_compat_xprt_iter_get_xprt(xpi)
+#endif
 
-#endif /* >= 7.0.0 */
+#endif /* >= 6.8.0 */
 
 #endif /* _ENFS_COMPAT_H_ */

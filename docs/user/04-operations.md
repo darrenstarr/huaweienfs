@@ -34,7 +34,7 @@ cat /proc/enfs/0/path
 
 Sample output:
 
-```
+```text
 id  local_addr        remote_addr       path_state  xprt_state
 0   <LOCAL_NIC_1>     <NFS_SERVER_1>    active      connected
 1   <LOCAL_NIC_1>     <NFS_SERVER_2>    active      connected
@@ -165,7 +165,7 @@ cat /sys/kernel/sunrpc/xprt-switches/switch-0/xprt_switch_info
 
 Sample:
 
-```
+```text
 num_xprts=2 num_active=2 queue_len=0
 ```
 

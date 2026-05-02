@@ -1,0 +1,72 @@
+From: enfs-dkms
+Subject: [PATCH] fs/nfs/client.c: propagate enfs_option to rpc_create_args + nfs_client_initdata, create multipath client
+
+Without this patch, fs_context.c parses enfs_info= / remoteaddrs= /
+localaddrs= and stashes them in ctx->enfs_option, but client.c never
+threads that into the structures used to construct the rpc_clnt — so
+enfs's create_clnt callback never sees a non-NULL multipath_option,
+never registers the client with multipath, and only the primary
+server gets traffic.
+
+Three additions, all guarded by CONFIG_ENFS:
+
+  1. Include enfs_adapter.h.
+  2. In nfs_create_rpc_client(), forward cl_init->enfs_option into the
+     rpc_create_args field added in patch 0005.
+  3. In nfs_init_client(), call nfs_create_multi_path_client() before
+     nfs_create_rpc_client() so enfs's per-client multipath state
+     exists by the time create_clnt fires.
+  4. In nfs_init_server() (where struct nfs_client_initdata is built
+     from the fs_context), copy ctx->enfs_option into cl_init.
+
+Verified with /sys/kernel/sunrpc/xprt-switches/switch-X/xprt_switch_info
+showing num_xprts=N for an N-server enfs_info= mount.
+
+---
+--- a/fs/nfs/client.c
++++ b/fs/nfs/client.c
+@@ -44,6 +44,9 @@
+ #include "callback.h"
+ #include "delegation.h"
+ #include "iostat.h"
++#if IS_ENABLED(CONFIG_ENFS)
++#include "enfs_adapter.h"
++#endif
+ #include "internal.h"
+ #include "fscache.h"
+ #include "pnfs.h"
+@@ -540,6 +543,9 @@
+ 		.xprtsec	= cl_init->xprtsec,
+ 		.connect_timeout = cl_init->connect_timeout,
+ 		.reconnect_timeout = cl_init->reconnect_timeout,
++#if IS_ENABLED(CONFIG_ENFS)
++		.multipath_option = cl_init->enfs_option,
++#endif
+ 	};
+ 
+ 	if (test_bit(NFS_CS_DISCRTRY, &clp->cl_flags))
+@@ -676,6 +682,14 @@
+ 	if (clp->cl_cons_state == NFS_CS_READY)
+ 		return clp;
+ 
++#if IS_ENABLED(CONFIG_ENFS)
++	error = nfs_create_multi_path_client(clp, cl_init);
++	if (error < 0) {
++		nfs_put_client(clp);
++		return ERR_PTR(error);
++	}
++#endif
++
+ 	/*
+ 	 * Create a client RPC handle for doing FSSTAT with UNIX auth only
+ 	 * - RFC 2623, sec 2.3.2
+@@ -748,6 +762,9 @@
+ 		.nconnect = ctx->nfs_server.nconnect,
+ 		.init_flags = (1UL << NFS_CS_REUSEPORT),
+ 		.xprtsec = ctx->xprtsec,
++#if IS_ENABLED(CONFIG_ENFS)
++		.enfs_option = ctx->enfs_option,
++#endif
+ 	};
+ 	struct nfs_client *clp;
+ 	int error;

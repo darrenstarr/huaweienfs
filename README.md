@@ -1,58 +1,102 @@
 # enfs-dkms
 
-A DKMS-packaged port of the OpenEuler **enfs** (Enhanced NFS) module to
-the **Ubuntu 26.04 LTS** ("resolute") kernel (7.0.x).
+[![build](https://github.com/darrenstarr/huaweienfs/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/darrenstarr/huaweienfs/actions/workflows/build.yml)
+[![lint](https://github.com/darrenstarr/huaweienfs/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/darrenstarr/huaweienfs/actions/workflows/lint.yml)
 
-`enfs` adds NFSv3/v4 client multipath, transport failover, round-robin
-RPC dispatch and runtime path management on top of the in-tree Linux
-NFS client. Upstream lives in `fs/nfs/enfs/` of the OpenEuler kernel
-tree, branch `OLK-6.6`:
+A DKMS-packaged port of the OpenEuler **enfs** (Enhanced NFS) module
+to **Ubuntu 24.04 / 26.04 LTS** kernels.
 
-- Repository: <https://gitee.com/openeuler/kernel>
-- Branch: <https://gitee.com/openeuler/kernel/tree/OLK-6.6>
-- enfs source dir:
-  <https://gitee.com/openeuler/kernel/tree/OLK-6.6/fs/nfs/enfs>
-- Project Kconfig: see `vendor/openeuler/fs/nfs/Kconfig` (`config ENFS`)
+## About the project
 
-The exact upstream commit we vendored is recorded in
-`vendor/openeuler/UPSTREAM-REVISION`.
-
-## Status
-
-**Active porting.** Patches are landing in `patches/ubuntu-7.0/` and
-the build pipeline is being wired up. The project follows
-**Option B′**: vendor the 14 stock Ubuntu 7.0 kernel files we need
-under `vendor/ubuntu-7.0/`, apply small focused patches on top, and
-combine them with the OE-only "new" files under
-`vendor/openeuler/{enfs/, *_adapter.*}` to produce `nfs.ko`,
-`sunrpc.ko` and `enfs.ko` against the user's installed
-`linux-headers-*`. See `docs/PORTING-NOTES.md` for the porting model
-and per-patch index, and `docs/ARCHITECTURE.md` for the build
-pipeline.
-
-## What enfs does (one-page summary)
+`enfs` lets a single NFS mount talk to a *cluster* of NFS server
+addresses at the same time. RPCs round-robin across the live paths,
+and if a server stops responding the others keep serving — without
+the application noticing. You can edit the path list at runtime
+through `/proc`.
 
 ```mermaid
 flowchart LR
-    App["Application<br/>(read/write)"] --> NFSc["Linux NFS client<br/>(nfs.ko)"]
-    NFSc --> Adapter["enfs_adapter<br/>(in nfs.ko)"]
-    Adapter -. registers .-> Enfs["enfs.ko<br/>multipath / failover /<br/>round-robin / DNS"]
-    Enfs --> SunRPC["sunrpc.ko<br/>+ sunrpc_enfs_adapter"]
-    SunRPC -->|xprt 1| S1[("NFS server A")]
-    SunRPC -->|xprt 2| S2[("NFS server B")]
-    SunRPC -->|xprt 3| S3[("NFS server C")]
+    App["Application<br/>(read/write)"] --> NFSc["Linux NFS client"]
+    NFSc --> Enfs["enfs<br/>multipath / failover /<br/>round-robin / DNS"]
+    Enfs -->|path 1| S1[("NFS server A")]
+    Enfs -->|path 2| S2[("NFS server B")]
+    Enfs -->|path 3| S3[("NFS server C")]
 ```
 
-A single mount point uses several server addresses (or several local
-source addresses) concurrently. RPCs round-robin across active
-transports; if one transport stops responding, traffic moves to the
-others. Server lists can be edited at runtime through `/proc`.
+This repository takes the OpenEuler implementation (which lives inside
+their kernel tree at [`fs/nfs/enfs/`](https://gitee.com/openeuler/kernel/tree/OLK-6.6/fs/nfs/enfs))
+and packages it as a DKMS module that builds against stock Ubuntu
+kernel headers. Nothing in your kernel package gets touched — `dkms
+remove` cleanly restores the in-tree NFS client.
 
-## Why DKMS
+Currently working end-to-end on:
+
+| Ubuntu | Kernel       | Notes                              |
+|--------|--------------|------------------------------------|
+| 26.04  | 7.0.x        | GA target                          |
+| 24.04  | 6.14 HWE     | works after one-time initramfs rebuild |
+| 24.04  | 6.8 GA       | works                              |
+
+## Quick start
+
+If you just want to install it and mount something:
+
+→ **[Quickstart: zero-to-mounted in 3 minutes](docs/user/00-quickstart.md)**
+(5 commands, one reboot, one diagram).
+
+If you want to hack on the port itself:
+
+```bash
+make help                # list every target with current variable values
+make port                # materialise src/ from vendor + patches + compat
+make modules             # build modules locally against your headers
+make deb                 # build the .deb
+```
+
+The full developer workflow (sync to a test VM, smoke test, etc.) is
+in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Credits
+
+Almost the entire effort that produced this repository — the
+architectural decisions, the patch series, the `__GENKSYMS__` CRC
+trick that lets our patched `sunrpc.ko` interoperate with stock
+`lockd` / `nfs_acl` / `nfsd`, the DKMS scaffolding, the `.deb`
+packaging, the multi-server LXC test topology, the prose
+documentation, and the verification that 1 MiB NFS reads round-robin
+across 4 servers — was driven by
+**[Claude](https://claude.com/) Opus 4.7 running in 1M-token context
+mode**. A human (the repo owner) provided direction, reviewed
+checkpoints, vetoed bad approaches, and supplied the test
+infrastructure; the heavy lifting was the model.
+
+The Anthropic API tokens for this work were generously paid for by the
+**[University of Oslo](https://www.uio.no/english/)**. Many thanks.
+
+### Liability
+
+**We take NO responsibility for this code in any way.**
+
+If it works for your storage system: AWESOME, please tell us.
+
+If it doesn't: it's Claude's fault. Open an issue with the dmesg output
+and we'll have a model fix the model's bugs.
+
+If it eats your data, melts your kernel, or sets your servers on fire:
+GPL-2.0 §15 ("NO WARRANTY") is exactly what it says, and `__GENKSYMS__`
+gymnastics on a kernel module that *replaces* parts of the in-tree NFS
+client stack is not something to deploy on production storage without
+your own thorough validation. Use a non-critical staging mount first.
+
+---
+
+## Details and architecture
+
+### Why DKMS
 
 Stock Ubuntu kernels do not ship `enfs`, and the module is not a clean
-out-of-tree drop-in: it requires patches inside `nfs.ko` and `sunrpc.ko`
-as well. DKMS gives us:
+out-of-tree drop-in: it requires patches inside `nfs.ko` and
+`sunrpc.ko` as well. DKMS gives us:
 
 - automatic rebuild against new Ubuntu kernel versions on `apt upgrade`,
 - installation to `/lib/modules/$(uname -r)/updates/` (which `modprobe`
@@ -60,58 +104,16 @@ as well. DKMS gives us:
   `nfs.ko` / `sunrpc.ko` without touching the kernel package, and
 - a clean `dkms remove` rollback path that restores the stock modules.
 
-## Layout
+### How the build works
 
-```
-vendor/openeuler/         Reference + source for the OE-only "new" files
-                          (verbatim OpenEuler OLK-6.6 sources)
-  fs/nfs/enfs/              the standalone enfs.ko sources [BUILT]
-  fs/nfs/enfs_adapter.*     glue compiled into nfs.ko      [BUILT]
-  net/sunrpc/sunrpc_enfs_adapter.c
-                            glue compiled into sunrpc.ko   [BUILT]
-  include/linux/sunrpc/sunrpc_enfs_adapter.h               [BUILT]
-  fs/nfs/{super,fs_context,nfs3xdr,internal.h,Kconfig,Makefile}
-  net/sunrpc/{clnt,xprt,Kconfig,Makefile}
-  include/linux/{nfs_fs_sb,nfs_xdr}.h
-  include/linux/sunrpc/{sched,clnt}.h
-                            OE-modified copies, kept for reference / diff
-                            (NOT built directly under Option B′)
-  UPSTREAM-REVISION         pinned OpenEuler commit we vendored from
-
-vendor/ubuntu-7.0/        Stock Ubuntu 26.04 kernel files we patch
-                          (verbatim from linux_7.0.0-14.14)
-  fs/nfs/{super,fs_context,nfs3xdr,internal.h,Kconfig,Makefile}
-  net/sunrpc/{clnt,xprt,Kconfig,Makefile}
-  include/linux/{nfs_fs_sb,nfs_xdr}.h
-  include/linux/sunrpc/{sched,clnt}.h
-                            14 stock files; original SPDX/copyright
-                            headers preserved verbatim
-  UPSTREAM-REVISION         pinned Ubuntu kernel package
-
-patches/ubuntu-7.0/       Patches applied on top of vendor/ubuntu-7.0/
-  series                    ordered list applied by `make port`
-  *.patch                   one focused patch per file/feature
-
-src/                      Project sources after porting (generated; gitignored)
-compat/                   Kernel-version compat shims
-debian/                   dpkg packaging (enfs-dkms .deb)
-scripts/                  Build / sync / VM-deploy helpers
-docs/                     User docs + ARCHITECTURE / PORTING / DKMS notes
-dkms.conf.in              DKMS manifest template
-Kbuild                    Top-level out-of-tree build entry
-Makefile                  `make help` lists targets
-```
-
-## How the build works
-
-Under **Option B′**, three input streams converge to produce the three
-`.ko` files we ship. Stock Ubuntu source is patched in place; the
-OE-only "new" files (enfs subsystem + adapter glue) are dropped in
-alongside as additions.
+Three input streams converge to produce the modules we ship. Stock
+Ubuntu source is patched in place; the OpenEuler-only "new" files
+(the enfs subsystem + adapter glue) are dropped in alongside as
+additions.
 
 ```mermaid
 flowchart LR
-    U["vendor/ubuntu-7.0/<br/>(14 stock kernel files)"]
+    U["vendor/ubuntu-7.0/<br/>(stock kernel files we patch)"]
     OE["vendor/openeuler/<br/>enfs/ + *_adapter.*<br/>(OE-only new files)"]
     P["patches/ubuntu-7.0/series<br/>(focused patches)"]
 
@@ -141,95 +143,90 @@ flowchart LR
 
 `updates/` outranks `kernel/` in `depmod` order, so subsequent
 `modprobe nfs` / `modprobe sunrpc` pick up our patched copies.
-See `docs/ARCHITECTURE.md` § Build pipeline for more detail and
-`docs/PORTING-NOTES.md` for the per-patch index.
 
-## Development environment (placeholders)
+The same pipeline is parameterised by `TARGET=ubuntu-{6.8,6.14,7.0}`
+so the matrix of supported kernels uses one set of scripts and one
+set of OE source files; only the per-target `vendor/ubuntu-X.Y/` and
+`patches/ubuntu-X.Y/` directories differ. `make port` auto-picks the
+right target from the running kernel's version, or accept an
+explicit `TARGET=` override.
 
-This project is developed against a libvirt host that hosts both the
-kernel source workspace and the test VM. The public docs use these
-placeholders; substitute your own values.
+### Layout
 
-| Placeholder | What it is | This project's value |
-|---|---|---|
-| `<BUILD_HOST>` | ssh-reachable libvirt host | (see `secrets/beast.md` locally) |
-| `<KERNEL_WORK_PATH>` | scratch dir on `<BUILD_HOST>` for kernel sources | (see `secrets/beast.md`) |
-| `<TEST_VM_HOST>` | `user@ip` of the Ubuntu 26.04 test VM | (see `secrets/test-vm.md`) |
-| `<VM_PATH>` | working dir on the test VM | `/home/<user>/enfs-dkms` |
+```text
+vendor/openeuler/         OpenEuler reference + the OE-only "new" files
+                          (verbatim OpenEuler OLK-6.6 sources)
+  fs/nfs/enfs/              the standalone enfs.ko sources [BUILT]
+  fs/nfs/enfs_adapter.*     glue compiled into nfs.ko      [BUILT]
+  net/sunrpc/sunrpc_enfs_adapter.c
+                            glue compiled into sunrpc.ko   [BUILT]
+  include/linux/sunrpc/sunrpc_enfs_adapter.h               [BUILT]
+  fs/nfs/{super,fs_context,nfs3xdr,internal.h,Kconfig,Makefile}
+  net/sunrpc/{clnt,xprt,Kconfig,Makefile}
+  include/linux/{nfs_fs_sb,nfs_xdr}.h
+  include/linux/sunrpc/{sched,clnt}.h
+                            OE-modified copies, kept for reference / diff
+  UPSTREAM-REVISION         pinned OpenEuler commit we vendored from
 
-If you `git clone` this repo, create a `secrets/` directory locally
-(it's `.gitignore`d) and put your real values in it; or just override
-on the command line:
+vendor/ubuntu-{6.8,6.14,7.0}/
+                          Stock Ubuntu kernel files we patch (verbatim
+                          from the named Ubuntu kernel package), with
+                          original SPDX/copyright headers preserved.
 
-```bash
-make sync-vm  VM_HOST=ubuntu@10.0.0.42  VM_PATH=/home/ubuntu/enfs-dkms
+patches/ubuntu-{6.8,6.14,7.0}/
+  series                    ordered list applied by `make port`
+  *.patch                   one focused patch per file/feature
+
+src/                      Project sources after porting (generated; gitignored)
+compat/                   Kernel-version compat shims
+debian/                   dpkg packaging (enfs-dkms .deb)
+scripts/                  Build / sync / VM-deploy helpers
+docs/                     User docs + ARCHITECTURE / PORTING / DKMS notes
+dkms.conf.in              DKMS manifest template
+Kbuild                    Top-level out-of-tree build entry
+Makefile                  `make help` lists targets
 ```
 
-The reference deployment for this project is documented in
-`secrets/beast.md` and `secrets/test-vm.md` (local-only).
-
-## Just want to install and use it?
-
-→ **[Quickstart: zero-to-mounted in 3 minutes](docs/user/00-quickstart.md)** (5 commands, one reboot, one diagram)
-
-## Developer quick start
-
-```bash
-make help                # list all targets and current variable values
-make port                # materialise src/ from vendor + compat + patches
-make sync-vm             # rsync to the test VM (set VM_HOST first)
-make build-on-vm         # build modules on the test VM against its headers
-make smoke-on-vm         # build + dkms-install + modprobe enfs + dmesg tail
-make deb                 # build the .deb on the local box
-```
-
-## Documentation map
+### Documentation map
 
 - **User docs** — `docs/user/`:
-  - **[00-quickstart.md](docs/user/00-quickstart.md) — start here: 3-minute install, then mount your storage**
+  - **[00-quickstart.md](docs/user/00-quickstart.md) — start here**
   - [01-overview.md](docs/user/01-overview.md) — what enfs is, when to use it (and when not)
-  - [02-installation.md](docs/user/02-installation.md) — long-form install reference (build from source, signed packages, kernel-update behaviour)
+  - [02-installation.md](docs/user/02-installation.md) — long-form install reference
   - [03-mount-syntax.md](docs/user/03-mount-syntax.md) — `remoteaddrs=`, `localaddrs=`, `enfs_info=` reference
   - [04-operations.md](docs/user/04-operations.md) — `/proc/enfs/`, sysfs, live remount, DNS rebind, `tcpdump`
-  - [05-troubleshooting.md](docs/user/05-troubleshooting.md) — symptom -> cause -> fix runbook
+  - [05-troubleshooting.md](docs/user/05-troubleshooting.md) — symptom → cause → fix runbook
   - [06-uninstall.md](docs/user/06-uninstall.md) — clean rollback to stock NFS
 - **Architecture** — `docs/ARCHITECTURE.md` (component map, hook sites)
 - **Porting status** — `docs/PORTING-NOTES.md` (API drift table, work list)
 - **DKMS internals** — `docs/DKMS-NOTES.md` (why three modules, install layout)
-- **Stock-vs-eNFS diff report** — `docs/differences/` (planned)
 - **AI agent guidance** — `docs/ai-agent-guide.md` (rules for Claude/etc.)
 
-## How this port was made
+### Development environment placeholders
 
-Almost the entire effort that produced this repository — the architectural
-decisions, the patch series, the `__GENKSYMS__` CRC trick that makes our
-patched `sunrpc.ko` interoperate with stock `lockd` / `nfs_acl` /
-`nfsd`, the DKMS scaffolding, the .deb packaging, the multi-server LXC
-test topology, the prose documentation under `docs/changes/` and
-`docs/user/`, and the verification that 1 MiB NFS reads round-robin
-across 4 servers — was driven by **[Claude](https://claude.com/) Opus 4.7
-running in 1M-token context mode**. A human (the repo owner) provided
-direction, reviewed checkpoints, vetoed bad approaches, and supplied the
-test infrastructure; the heavy lifting was the model.
+The public docs use these placeholders; substitute your own values
+(or override on the command line, e.g.
+`make sync-vm VM_HOST=ubuntu@10.0.0.42`).
 
-The Anthropic API tokens for this work were generously paid for by the
-**[Center for Information Technology, University of Oslo](https://www.uio.no/english/services/it/)**.
-Many thanks.
+| Placeholder | What it is |
+|---|---|
+| `<BUILD_HOST>` | ssh-reachable libvirt host |
+| `<KERNEL_WORK_PATH>` | scratch dir on `<BUILD_HOST>` for kernel sources |
+| `<TEST_VM_HOST>` | `user@ip` of the Ubuntu test VM |
+| `<VM_PATH>` | working dir on the test VM |
 
-### Liability
+If you `git clone` this repo, create a `secrets/` directory locally
+(it's `.gitignore`d) and put your real values in it.
 
-**We take NO responsibility for this code in any way.**
+### Upstream
 
-If it works for your storage system: AWESOME, please tell us.
+- Repository: <https://gitee.com/openeuler/kernel>
+- Branch: <https://gitee.com/openeuler/kernel/tree/OLK-6.6>
+- enfs source dir:
+  <https://gitee.com/openeuler/kernel/tree/OLK-6.6/fs/nfs/enfs>
 
-If it doesn't: it's Claude's fault. Open an issue with the dmesg output
-and we'll have a model fix the model's bugs.
-
-If it eats your data, melts your kernel, or sets your servers on fire:
-GPL-2.0 §15 ("NO WARRANTY") is exactly what it says, and `__GENKSYMS__`
-gymnastics on a kernel module that *replaces* parts of the in-tree NFS
-client stack is not something to deploy on production storage without
-your own thorough validation. Use a non-critical staging mount first.
+The exact upstream commit we vendored is recorded in
+`vendor/openeuler/UPSTREAM-REVISION`.
 
 ## License
 

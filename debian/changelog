@@ -1,3 +1,19 @@
+enfs-dkms (0.1.1-1) noble; urgency=medium
+
+  * First usable release. Builds and loads end-to-end on:
+      - Ubuntu 26.04 LTS (kernel 7.0)
+      - Ubuntu 24.04 LTS HWE (kernel 6.14)
+      - Ubuntu 24.04 LTS GA (kernel 6.8)
+  * 4-path multipath mount verified on 7.0 (25/25/25/25 load split
+    across four NFS backends) and on 6.8 + 6.14 (xprt switch shows
+    N active transports, pm_ping monitors all paths).
+  * GitHub Actions CI: build matrix across all three targets plus
+    a lintian-clean .deb build, gated by branch protection on main.
+  * Tagged v* releases auto-publish the .deb via the release
+    workflow.
+
+ -- Darren <darren@example.invalid>  Sat, 02 May 2026 10:26:11 +0200
+
 enfs-dkms (0.1.0-1) UNRELEASED; urgency=medium
 
   * Initial scaffold.

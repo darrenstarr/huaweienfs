@@ -5,16 +5,33 @@
 # scaffolding tasks (DKMS install/uninstall, Debian packaging, syncing
 # sources to the test VM, etc.).
 
-VERSION       ?= 0.1.0
+VERSION       ?= 0.1.1
 KVER          ?= $(shell uname -r)
 KDIR          ?= /lib/modules/$(KVER)/build
 DKMS_TREE     ?= /var/lib/dkms
 PROJECT       := enfs
 SRC_DIR       := $(CURDIR)/src
-# Option B′: stock Ubuntu source + patches + OE-only new files + compat.
-UBUNTU_VENDOR_DIR := $(CURDIR)/vendor/ubuntu-7.0
+
+# Pick the right vendor + patches set for the kernel we're building
+# against. Override via `make port TARGET=ubuntu-6.8` etc. The default
+# is auto-detected from KVER's major.minor.
+ifndef TARGET
+ifeq ($(filter 7.0.%,$(KVER)),$(KVER))
+TARGET := ubuntu-7.0
+else ifeq ($(filter 6.14.%,$(KVER)),$(KVER))
+TARGET := ubuntu-6.14
+else ifeq ($(filter 6.11.%,$(KVER)),$(KVER))
+TARGET := ubuntu-6.11
+else ifeq ($(filter 6.8.%,$(KVER)),$(KVER))
+TARGET := ubuntu-6.8
+else
+TARGET := ubuntu-7.0
+endif
+endif
+
+UBUNTU_VENDOR_DIR := $(CURDIR)/vendor/$(TARGET)
 OE_VENDOR_DIR     := $(CURDIR)/vendor/openeuler
-PATCHES_DIR       := $(CURDIR)/patches/ubuntu-7.0
+PATCHES_DIR       := $(CURDIR)/patches/$(TARGET)
 COMPAT_DIR        := $(CURDIR)/compat
 # VM_HOST and VM_PATH are intentionally unset by default — set them in
 # your shell, in secrets/local-env.sh (gitignored), or on the command
@@ -46,7 +63,13 @@ help:
 	@echo "  make build-on-vm       ssh into VM and run 'make modules'"
 	@echo "  make smoke-on-vm       ssh into VM, dkms-install, modprobe enfs, dmesg tail"
 	@echo
-	@echo "Variables: VERSION=$(VERSION) KVER=$(KVER) KDIR=$(KDIR) VM_HOST=$(VM_HOST)"
+	@echo "Variables: VERSION=$(VERSION) KVER=$(KVER) KDIR=$(KDIR) TARGET=$(TARGET) VM_HOST=$(VM_HOST)"
+	@echo
+	@echo "Supported targets (override with TARGET=...):"
+	@echo "  ubuntu-7.0   Ubuntu 26.04 LTS GA kernel"
+	@echo "  ubuntu-6.14  Ubuntu 24.04.2+ HWE kernel"
+	@echo "  ubuntu-6.11  Ubuntu 24.04.1 HWE kernel"
+	@echo "  ubuntu-6.8   Ubuntu 24.04 LTS GA kernel"
 
 .PHONY: port
 port:

@@ -1,0 +1,43 @@
+From: enfs-dkms
+Subject: [PATCH] fs/nfs/Kconfig: add CONFIG_ENFS and CONFIG_ENFS_KUNIT_TEST
+
+Append the two enfs Kconfig stanzas verbatim from OpenEuler. The
+SUNRPC_ENFS dependency is added by the matching patch to
+net/sunrpc/Kconfig.
+
+---
+ fs/nfs/Kconfig | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+--- a/fs/nfs/Kconfig
++++ b/fs/nfs/Kconfig
+@@ -215,3 +215,28 @@ config NFS_V4_2_READ_PLUS
+ 	default y
+ 	help
+ 	 Choose Y here to enable use of the NFS v4.2 READ_PLUS operation.
++
++config ENFS
++	tristate "NFS client support for ENFS"
++	depends on NFS_FS
++	depends on X86 || X86_64 || ARM64
++	select SUNRPC_ENFS
++	default n
++	help
++	 This option enables support multipath of the NFS protocol
++	 in the kernel's NFS client.
++	 This feature will improve performance and reliability.
++
++	 If sure, say Y.
++
++config ENFS_KUNIT_TEST
++	bool "This builds the ENFS KUnit tests" if !KUNIT_ALL_TESTS
++	depends on KUNIT
++	default KUNIT_ALL_TESTS
++	help
++	  Only useful for kernel devs running KUnit test harness and are not
++	  for inclusion into a production build.
++
++	  For more information on KUnit and unit tests in general please refer
++	  to the KUnit documentation in Documentation/dev-tools/kunit/.
++
++	  If unsure, say N.
