@@ -1,3 +1,19 @@
+enfs-dkms (0.1.2-1) noble; urgency=medium
+
+  * Fix DKMS install: dh_dkms needs the full dkms.conf with
+    #MODULE_VERSION# placeholder, not a 4-line stub. Without this fix
+    `apt install enfs-dkms_0.1.1-1_amd64.deb` succeeded but the
+    post-install `dkms add` failed with "directory
+    /var/lib/dkms/enfs/#MODULE_VERSION#/source does not appear to
+    have module source located within it". 0.1.2 is the first .deb
+    that actually installs cleanly.
+  * Builds and loads end-to-end on:
+      - Ubuntu 26.04 LTS         (kernel 7.0)        [GA]
+      - Ubuntu 24.04 LTS HWE     (kernel 6.14)
+      - Ubuntu 24.04 LTS GA      (kernel 6.8)
+
+ -- Darren <darren@example.invalid>  Sat, 02 May 2026 10:41:38 +0200
+
 enfs-dkms (0.1.1-1) noble; urgency=medium
 
   * First usable release. Builds and loads end-to-end on:
