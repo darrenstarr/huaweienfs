@@ -11,6 +11,15 @@ DKMS_SRC = $(CURDIR)/debian/enfs-dkms/usr/src/enfs-$(DEB_VERSION_UPSTREAM)
 %:
 	dh $@ --with dkms
 
+# dh_dkms only substitutes the `#MODULE_VERSION#` placeholder in
+# debian/<pkg>.dkms when invoked with `-V` (see man dh_dkms). Without
+# this override the package ships /usr/src/enfs-#MODULE_VERSION#/
+# dkms.conf with PACKAGE_VERSION="#MODULE_VERSION#" literally, and
+# the post-install `dkms add` fails. With -V (no value), dh_dkms
+# uses the upstream version from debian/changelog.
+override_dh_dkms:
+	dh_dkms -V
+
 override_dh_auto_build:
 	# DKMS modules don't build at packaging time; the kernel build
 	# happens on the user's machine via DKMS. We generate two files
