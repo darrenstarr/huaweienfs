@@ -152,7 +152,7 @@ jobs:
               set -e
               apt-get update
               apt-get install -y build-essential bc kmod cpio flex bison \
-                  libssl-dev libelf-dev zstd dwarves make \
+                  libssl-dev libelf-dev zstd dwarves make file \
                   ${{ matrix.headers }}
               KVER=$(ls /lib/modules/ | grep "^${{ matrix.kver-prefix }}" | head -1)
               if [ -z "$KVER" ]; then
