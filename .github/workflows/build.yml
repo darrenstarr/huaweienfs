@@ -184,14 +184,22 @@ jobs:
           # scripts/basic/fixdep, scripts/genksyms/genksyms,
           # scripts/mod/modpost (etc.) as aarch64 ELFs, which won't
           # run on the amd64 CI runner ("Exec format error"). Rebuild
-          # them using HOSTCC (= host gcc, amd64). `make scripts`
-          # covers all of them.
-          sudo make -C ${{ steps.kver.outputs.kdir }} \
-              ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-              scripts
-          file ${{ steps.kver.outputs.kdir }}/scripts/basic/fixdep \
-               ${{ steps.kver.outputs.kdir }}/scripts/genksyms/genksyms \
-               ${{ steps.kver.outputs.kdir }}/scripts/mod/modpost
+          # those three using HOSTCC (= host gcc, amd64).
+          #
+          # We can't use the broad `make scripts` target — that pulls
+          # in scripts/selinux/genheaders which needs classmap.h
+          # (not shipped in linux-headers-*). Stick to the three
+          # tools an out-of-tree module build actually invokes.
+          K=${{ steps.kver.outputs.kdir }}
+          sudo make -C "$K" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+              scripts_basic
+          sudo make -C "$K" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+              M=scripts/genksyms scripts/genksyms/genksyms
+          sudo make -C "$K" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+              M=scripts/mod scripts/mod/modpost
+          file "$K"/scripts/basic/fixdep \
+               "$K"/scripts/genksyms/genksyms \
+               "$K"/scripts/mod/modpost
 
       - name: Port source tree
         run: make port TARGET=${{ matrix.target }}
