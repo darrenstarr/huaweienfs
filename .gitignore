@@ -59,3 +59,4 @@ debian/debhelper-build-stamp
 *.swp
 *~
 .DS_Store
+/debian/enfs-dkms.dkms
