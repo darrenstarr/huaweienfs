@@ -112,6 +112,96 @@ jobs:
             ls -lh "$ko"
           done
 
+  # aarch64 cross-compile against Ubuntu 24.04 ARM64 kernel headers.
+  # Hardware-emulated arm64 builds (under TCG) take 4-8 hours; cross-
+  # compile finishes in 2-3 minutes. We don't try to *load* the
+  # modules — that requires a real arm64 kernel, which we test
+  # separately on enfs-dev-24-arm64.
+  build-arm64-cross:
+    name: build (${{ matrix.target }} arm64 cross)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: ubuntu-6.8
+            kver-prefix: "6.8.0"
+          - target: ubuntu-6.14
+            kver-prefix: "6.14.0"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Enable arm64 apt sources + install cross toolchain
+        run: |
+          set -e
+          # Restrict the existing amd64 sources so dpkg --add-architecture
+          # arm64 doesn't try to fetch arm64 versions of every amd64 package.
+          sudo sed -i 's|^Types: deb$|Types: deb\nArchitectures: amd64|' \
+              /etc/apt/sources.list.d/ubuntu.sources
+          sudo dpkg --add-architecture arm64
+          # Add Ubuntu Ports archive (where arm64 packages live) — separate
+          # mirror from archive.ubuntu.com which only carries amd64/i386.
+          sudo tee /etc/apt/sources.list.d/arm64-ports.sources >/dev/null <<'EOF'
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble noble-updates noble-security
+          Components: main universe
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc kmod cpio flex bison \
+              libssl-dev libelf-dev zstd dwarves make \
+              gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Install arm64 kernel headers
+        run: |
+          set -e
+          if [ "${{ matrix.target }}" = "ubuntu-6.8" ]; then
+              sudo apt-get install -y linux-headers-generic:arm64
+          else
+              # 6.14 is HWE — pick the same -37 ABI we test on amd64 for parity
+              sudo apt-get install -y linux-headers-6.14.0-37-generic:arm64
+          fi
+
+      - name: Pick a real KVER from installed arm64 headers
+        id: kver
+        run: |
+          # Headers install under /usr/src not /lib/modules for foreign arch
+          KVER=$(ls /usr/src/ | grep "^linux-headers-${{ matrix.kver-prefix }}.*-generic$" | head -1 | sed 's|^linux-headers-||')
+          if [ -z "$KVER" ]; then
+            echo "::error::No arm64 headers found matching ${{ matrix.kver-prefix }}.*"
+            ls /usr/src/
+            exit 1
+          fi
+          echo "kver=$KVER" >> "$GITHUB_OUTPUT"
+          echo "kdir=/usr/src/linux-headers-$KVER" >> "$GITHUB_OUTPUT"
+          echo "Using KVER=$KVER  KDIR=/usr/src/linux-headers-$KVER"
+
+      - name: Port source tree
+        run: make port TARGET=${{ matrix.target }}
+
+      - name: Cross-build modules for arm64
+        run: |
+          make modules \
+            TARGET=${{ matrix.target }} \
+            KVER=${{ steps.kver.outputs.kver }} \
+            KDIR=${{ steps.kver.outputs.kdir }} \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu-
+
+      - name: Confirm all six modules linked + are aarch64
+        run: |
+          set -e
+          for ko in src/sunrpc.ko src/nfs.ko src/fs/nfs/nfsv3.ko \
+                    src/fs/lockd/lockd.ko src/fs/nfs_common/nfs_acl.ko \
+                    src/fs/nfs/enfs/enfs.ko; do
+            [ -f "$ko" ] || { echo "::error::missing $ko"; exit 1; }
+            file "$ko" | grep -q "ELF 64-bit LSB.*aarch64" \
+                || { echo "::error::$ko is not aarch64"; file "$ko"; exit 1; }
+            ls -lh "$ko"
+          done
+
   # The .deb itself doesn't need a kernel build — it's the DKMS source
   # tarball + control files. dpkg-buildpackage runs lintian afterwards.
   build-deb:
