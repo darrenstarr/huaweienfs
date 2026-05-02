@@ -3,9 +3,10 @@
 #
 # Usage: deploy-to-vm.sh USER@HOST DEST_PATH
 #
-# Excludes git metadata, build artefacts, and the (large) vendor/openeuler
-# tree by default - the VM only needs src/, scripts/, debian/, dkms.conf.in
-# and the Makefile for builds. Pass -v in $RSYNC_OPTS for chatty output.
+# Excludes git metadata and build artefacts. Includes all vendor/* trees
+# so `make port` (run as part of `make modules`) can rebuild src/ from
+# vendored Ubuntu source + patches + OE-only files. Total vendor/ is
+# ~7 MB which is trivial. Pass -v in $RSYNC_OPTS for chatty output.
 
 set -euo pipefail
 
@@ -20,8 +21,6 @@ rsync -a --delete $RSYNC_OPTS \
     --exclude='.git' \
     --exclude='*.ko' --exclude='*.o' --exclude='.*.cmd' \
     --exclude='*.mod*' --exclude='Module.symvers' --exclude='modules.order' \
-    --exclude='vendor/openeuler' \
-    --include='vendor/' --include='vendor/openeuler/UPSTREAM-REVISION' \
     "$(dirname "$0")/.."/ "$VM_HOST:$VM_PATH/"
 
 echo "[deploy] synced to $VM_HOST:$VM_PATH"

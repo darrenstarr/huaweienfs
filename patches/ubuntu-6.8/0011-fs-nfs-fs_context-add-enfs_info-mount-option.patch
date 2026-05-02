@@ -1,0 +1,152 @@
+From: enfs-dkms
+Subject: [PATCH] fs/nfs/fs_context.c: enfs_info=/remoteaddrs=/localaddrs= (6.8 variant)
+
+Same shape as the 7.0 patch — seven hook sites teaching the NFS
+fs_context parser to accept the enfs multipath syntax. Rebased for
+6.8 where the Opt_* enum ends with Opt_xprtsec (no cert_serial /
+privkey_serial) and the parameter table ends one line earlier.
+
+Hook locations:
+  - include enfs_adapter.h after internal.h
+  - 5 new Opt_* entries after Opt_xprtsec
+  - 5 fsparam_string entries before the {} terminator
+  - getNfsMultiPathOpt() helper before nfs_parse_xprtsec_policy
+  - switch cases + 2 error labels in nfs_fs_context_parse_param
+  - nfs_multipath_set_mount_data() after nfs_parse_source()
+  - ctx->enfs_option=NULL in init; enfs_free_mount_options(ctx) in free
+
+---
+--- a/fs/nfs/fs_context.c
++++ b/fs/nfs/fs_context.c
+@@ -24,6 +24,9 @@
+ #include "nfs.h"
+ #include "internal.h"
+ 
++#if IS_ENABLED(CONFIG_ENFS)
++#include "enfs_adapter.h"
++#endif
+ #include "nfstrace.h"
+ 
+ #define NFSDBG_FACILITY		NFSDBG_MOUNT
+@@ -92,6 +95,13 @@
+ 	Opt_wsize,
+ 	Opt_write,
+ 	Opt_xprtsec,
++#if IS_ENABLED(CONFIG_ENFS)
++	Opt_remote_addrs,
++	Opt_local_iplist,
++	Opt_enfs_info,
++	Opt_slookupcache,
++	Opt_alookupcache,
++#endif
+ };
+ 
+ enum {
+@@ -199,6 +209,13 @@
+ 	fsparam_enum  ("write",		Opt_write, nfs_param_enums_write),
+ 	fsparam_u32   ("wsize",		Opt_wsize),
+ 	fsparam_string("xprtsec",	Opt_xprtsec),
++#if IS_ENABLED(CONFIG_ENFS)
++	fsparam_string("localaddrs",	Opt_local_iplist),
++	fsparam_string("remoteaddrs",	Opt_remote_addrs),
++	fsparam_string("enfs_info",	Opt_enfs_info),
++	fsparam_string("slookupcache",	Opt_slookupcache),
++	fsparam_string("alookupcache",	Opt_alookupcache),
++#endif
+ 	{}
+ };
+ 
+@@ -461,6 +478,21 @@
+ 	return 0;
+ }
+ 
++#if IS_ENABLED(CONFIG_ENFS)
++enum nfsmultipathoptions getNfsMultiPathOpt(int token)
++{
++	switch (token) {
++	case Opt_remote_addrs:
++		return REMOTEADDR;
++	case Opt_local_iplist:
++		return LOCALADDR;
++	default:
++		break;
++	}
++	return INVALID_OPTION;
++}
++#endif
++
+ static int nfs_parse_xprtsec_policy(struct fs_context *fc,
+ 				    struct fs_parameter *param)
+ {
+@@ -925,6 +957,28 @@
+ 	case Opt_sloppy:
+ 		ctx->sloppy = true;
+ 		break;
++#if IS_ENABLED(CONFIG_ENFS)
++	case Opt_local_iplist:
++	case Opt_remote_addrs:
++		switch (enfs_parse_mount_options(getNfsMultiPathOpt(opt),
++						 param->string, ctx, fc)) {
++		case 0:
++			break;
++		case -ENOMEM:
++			goto out_nomem;
++		case -ENOSPC:
++			goto out_limit;
++		case -EINVAL:
++			goto out_invalid_address;
++		case -EOPNOTSUPP:
++			goto out_invalid_address;
++		}
++		break;
++	case Opt_enfs_info:
++	case Opt_slookupcache:
++	case Opt_alookupcache:
++		break;
++#endif
+ 	}
+ 
+ 	return 0;
+@@ -937,6 +991,12 @@
+ 	return nfs_invalf(fc, "NFS: Value for '%s' out of range", param->key);
+ out_bad_transport:
+ 	return nfs_invalf(fc, "NFS: Unrecognized transport protocol");
++#if IS_ENABLED(CONFIG_ENFS)
++out_limit:
++	return nfs_invalf(fc, "NFS: param is more than supported limit");
++out_nomem:
++	return nfs_invalf(fc, "NFS: not enough memory to parse option");
++#endif
+ }
+ 
+ /*
+@@ -1454,6 +1514,9 @@
+ 	if (ret < 0)
+ 		return ret;
+ 
++#if IS_ENABLED(CONFIG_ENFS)
++	nfs_multipath_set_mount_data(&ctx->enfs_option, ctx->nfs_server.hostname);
++#endif
+ 	/* Load the NFS protocol module if we haven't done so yet */
+ 	if (!ctx->nfs_mod) {
+ 		nfs_mod = get_nfs_version(ctx->version);
+@@ -1537,6 +1600,9 @@
+ 	ctx->nfs_server.hostname	= NULL;
+ 	ctx->fscache_uniq		= NULL;
+ 	ctx->clone_data.fattr		= NULL;
++#if IS_ENABLED(CONFIG_ENFS)
++	ctx->enfs_option		= NULL;
++#endif
+ 	fc->fs_private = ctx;
+ 	return 0;
+ }
+@@ -1555,6 +1621,9 @@
+ 		kfree(ctx->nfs_server.export_path);
+ 		kfree(ctx->nfs_server.hostname);
+ 		kfree(ctx->fscache_uniq);
++#if IS_ENABLED(CONFIG_ENFS)
++		enfs_free_mount_options(ctx);
++#endif
+ 		nfs_free_fhandle(ctx->mntfh);
+ 		nfs_free_fattr(ctx->clone_data.fattr);
+ 		kfree(ctx);

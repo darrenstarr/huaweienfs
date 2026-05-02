@@ -1,0 +1,35 @@
+From: enfs-dkms
+Subject: [PATCH] fs/nfs/internal.h: add include guard
+
+Stock fs/nfs/internal.h has no #ifndef guard — fine when each TU
+includes it once, which is true in the in-tree build.
+
+Our patches make fs/nfs/super.c #include "enfs_adapter.h" (which
+itself #include "internal.h") AND #include "internal.h" directly.
+Without a guard the second include redefines every static inline,
+struct and enum in the file → ~30 redefinition errors.
+
+Adding a project-local guard fixes this. The macro name is
+deliberately enfs-prefixed so it can't conflict with anything stock
+might add later.
+
+---
+--- a/fs/nfs/internal.h
++++ b/fs/nfs/internal.h
+@@ -3,6 +3,10 @@
+  * NFS internal definitions
+  */
+ 
++#ifndef _ENFS_NFS_INTERNAL_H_GUARD_
++#define _ENFS_NFS_INTERNAL_H_GUARD_
++
++
+ #include "nfs4_fs.h"
+ #include <linux/fs_context.h>
+ #include <linux/security.h>
+@@ -1002,3 +1006,5 @@
+ #define NFS_ODIRECT_SHOULD_DIRTY	(3)	/* dirty user-space page after read */
+ #define NFS_ODIRECT_DONE		INT_MAX	/* write verification failed */
+ };
++
++#endif /* _ENFS_NFS_INTERNAL_H_GUARD_ */

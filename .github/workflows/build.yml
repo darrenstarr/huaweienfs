@@ -1,0 +1,135 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # 6.8 / 6.11 / 6.14 against Ubuntu 24.04 (noble) — public runner.
+  # noble has all three kernels in the archive, so a single runner OS
+  # covers the whole 24.04 LTS matrix.
+  build-noble:
+    name: build (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: ubuntu-6.8
+            kver-prefix: "6.8.0"
+            headers: "linux-headers-generic"
+          - target: ubuntu-6.11
+            kver-prefix: "6.11.0"
+            headers: "linux-headers-6.11.0-29-generic"
+          - target: ubuntu-6.14
+            kver-prefix: "6.14.0"
+            headers: "linux-headers-6.14.0-37-generic"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps + matching kernel headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc kmod cpio flex bison \
+              libssl-dev libelf-dev zstd dwarves
+          sudo apt-get install -y ${{ matrix.headers }}
+
+      - name: Pick a real KVER from installed headers
+        id: kver
+        run: |
+          KVER=$(ls /lib/modules/ | grep "^${{ matrix.kver-prefix }}" | head -1)
+          if [ -z "$KVER" ]; then
+            echo "::error::No installed headers match ${{ matrix.kver-prefix }}.*"
+            ls /lib/modules/
+            exit 1
+          fi
+          echo "kver=$KVER" >> "$GITHUB_OUTPUT"
+          echo "Using KVER=$KVER"
+
+      - name: Port source tree
+        run: make port TARGET=${{ matrix.target }}
+
+      - name: Build modules
+        run: make modules TARGET=${{ matrix.target }} KVER=${{ steps.kver.outputs.kver }}
+
+      - name: Confirm all six modules linked
+        run: |
+          set -e
+          for ko in src/sunrpc.ko src/nfs.ko src/fs/nfs/nfsv3.ko \
+                    src/fs/lockd/lockd.ko src/fs/nfs_common/nfs_acl.ko \
+                    src/fs/nfs/enfs/enfs.ko; do
+            [ -f "$ko" ] || { echo "::error::missing $ko"; exit 1; }
+            ls -lh "$ko"
+          done
+
+  # 7.0 needs Ubuntu 26.04 ("plucky"), which doesn't have a public
+  # GitHub Actions runner yet — use the official plucky container on
+  # an ubuntu-24.04 runner.
+  build-plucky:
+    name: build (ubuntu-7.0)
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:plucky
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps + 7.0 headers
+        run: |
+          apt-get update
+          apt-get install -y build-essential bc kmod cpio flex bison \
+              libssl-dev libelf-dev zstd dwarves make \
+              linux-headers-generic
+
+      - name: Pick a real KVER from installed headers
+        id: kver
+        run: |
+          KVER=$(ls /lib/modules/ | grep "^7\." | head -1)
+          if [ -z "$KVER" ]; then
+            echo "::error::No 7.x headers installed"
+            ls /lib/modules/
+            exit 1
+          fi
+          echo "kver=$KVER" >> "$GITHUB_OUTPUT"
+          echo "Using KVER=$KVER"
+
+      - name: Port source tree
+        run: make port TARGET=ubuntu-7.0
+
+      - name: Build modules
+        run: make modules TARGET=ubuntu-7.0 KVER=${{ steps.kver.outputs.kver }}
+
+      - name: Confirm all six modules linked
+        run: |
+          set -e
+          for ko in src/sunrpc.ko src/nfs.ko src/fs/nfs/nfsv3.ko \
+                    src/fs/lockd/lockd.ko src/fs/nfs_common/nfs_acl.ko \
+                    src/fs/nfs/enfs/enfs.ko; do
+            [ -f "$ko" ] || { echo "::error::missing $ko"; exit 1; }
+            ls -lh "$ko"
+          done
+
+  # The .deb itself doesn't need a kernel build — it's the DKMS source
+  # tarball + control files. dpkg-buildpackage runs lintian afterwards.
+  build-deb:
+    name: build .deb
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dpkg-dev + lintian
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev debhelper dkms lintian
+      - name: Build the .deb
+        run: dpkg-buildpackage -us -uc -b
+      - name: Stash artefact for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: enfs-dkms-deb
+          path: ../enfs-dkms_*.deb
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,42 @@
+From: enfs-dkms
+Subject: [PATCH] fs/nfs/internal.h: add enfs_option to nfs_client_initdata + nfs_fs_context
+
+enfs_info= mount option parsing produces a `struct multipath_mount_options`
+that needs to ride the mount-context plumbing from fs_context.c → super.c
+→ enfs_adapter. Two structs gain an opaque `void *enfs_option` field:
+
+  1. struct nfs_client_initdata — used while creating the rpc_clnt;
+     enfs_adapter casts it back to multipath_mount_options when it sees
+     the new client.
+  2. struct nfs_fs_context — owns the parsed options across the
+     mount/remount lifecycle; enfs_free_mount_options(ctx) releases it.
+
+Both fields are guarded by CONFIG_ENFS so a non-enfs build is a true
+no-op.
+
+---
+ fs/nfs/internal.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+--- a/fs/nfs/internal.h
++++ b/fs/nfs/internal.h
+@@ -86,6 +86,9 @@ struct nfs_client_initdata {
+ 	struct xprtsec_parms xprtsec;
+ 	unsigned long connect_timeout;
+ 	unsigned long reconnect_timeout;
++#if IS_ENABLED(CONFIG_ENFS)
++	void *enfs_option;	/* struct multipath_mount_options * */
++#endif
+ };
+
+ /*
+@@ -152,6 +155,9 @@ struct nfs_fs_context {
+ 		struct dentry		*dentry;
+ 		struct nfs_fattr	*fattr;
+ 	} clone_data;
++#if IS_ENABLED(CONFIG_ENFS)
++	void *enfs_option;	/* struct multipath_mount_options * */
++#endif
+ };
+
+ enum nfs_lock_status {

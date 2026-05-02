@@ -136,9 +136,13 @@ fs/lockd/lockd-y := \
 	fs/lockd/clntlock.o fs/lockd/clntproc.o fs/lockd/clntxdr.o \
 	fs/lockd/host.o fs/lockd/svc.o fs/lockd/svclock.o \
 	fs/lockd/svcshare.o fs/lockd/svcproc.o fs/lockd/svcsubs.o \
-	fs/lockd/mon.o fs/lockd/trace.o fs/lockd/xdr.o fs/lockd/netlink.o \
+	fs/lockd/mon.o fs/lockd/trace.o fs/lockd/xdr.o \
 	fs/lockd/clnt4xdr.o fs/lockd/xdr4.o fs/lockd/svc4proc.o \
 	fs/lockd/procfs.o
+# fs/lockd/netlink.c was added in Ubuntu 7.0 (NLM v4 netlink config
+# interface). Older kernels (6.8, 6.11) don't have it. Pick it up
+# conditionally so the same Kbuild works across vendored targets.
+fs/lockd/lockd-y += $(if $(wildcard $(src)/fs/lockd/netlink.c),fs/lockd/netlink.o)
 CFLAGS_fs/lockd/trace.o += -I$(src)/fs/lockd
 
 # ---------------------------------------------------------------------

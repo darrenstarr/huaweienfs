@@ -1,0 +1,51 @@
+From: enfs-dkms
+Subject: [PATCH] include/linux/sunrpc/clnt.h: add cl_enfs + multipath_option (6.14 variant)
+
+Same as the 6.8 patch (cl_shutdown is the LAST bitfield in struct
+rpc_clnt, terminated with `;`; cl_netunreach_fatal hasn't been added
+yet upstream), but rebased for kernel 6.14 where the struct also
+gained `atomic_t cl_task_count;` after `pipefs_sb` — that's the
+new last field, so our multipath_option insertion anchors against it.
+
+The __GENKSYMS__ guard structure mirrors the 7.0 patch: genksyms sees
+the stock layout (no cl_enfs, no multipath_option), gcc compiles the
+extended layout. Result: stock lockd/nfs_acl/nfsd CRCs match ours, so
+unmodified copies of those modules load against our patched sunrpc.ko
+without the "disagrees about version of symbol" error.
+
+---
+--- a/include/linux/sunrpc/clnt.h
++++ b/include/linux/sunrpc/clnt.h
+@@ -64,7 +64,12 @@
+ 				cl_noretranstimeo: 1,/* No retransmit timeouts */
+ 				cl_autobind : 1,/* use getport() */
+ 				cl_chatty   : 1,/* be verbose */
++#if defined(__GENKSYMS__) || !IS_ENABLED(CONFIG_SUNRPC_ENFS)
+ 				cl_shutdown : 1;/* rpc immediate -EIO */
++#else
++				cl_shutdown : 1,/* rpc immediate -EIO */
++				cl_enfs     : 1;/* enfs multipath enabled */
++#endif
+ 	struct xprtsec_parms	cl_xprtsec;	/* transport security policy */
+ 
+ 	struct rpc_rtt *	cl_rtt;		/* RTO estimator data */
+@@ -94,6 +99,9 @@
+ 	unsigned int		cl_max_connect; /* max number of transports not to the same IP */
+ 	struct super_block *pipefs_sb;
+ 	atomic_t		cl_task_count;
++#if !defined(__GENKSYMS__) && IS_ENABLED(CONFIG_SUNRPC_ENFS)
++	void			*multipath_option;	/* hidden from genksyms so CRC matches stock */
++#endif
+ };
+ 
+ /*
+@@ -152,6 +160,9 @@
+ 	struct xprtsec_parms	xprtsec;
+ 	unsigned long		connect_timeout;
+ 	unsigned long		reconnect_timeout;
++#if !defined(__GENKSYMS__) && IS_ENABLED(CONFIG_SUNRPC_ENFS)
++	void			*multipath_option;	/* hidden from genksyms so CRC matches stock */
++#endif
+ };
+ 
+ struct rpc_add_xprt_test {

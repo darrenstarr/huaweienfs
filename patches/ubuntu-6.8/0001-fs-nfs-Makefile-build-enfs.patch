@@ -1,0 +1,27 @@
+From: enfs-dkms
+Subject: [PATCH] fs/nfs/Makefile: build enfs_adapter.o into nfs.ko and descend into enfs/
+
+Adds two build hooks to the stock Ubuntu 7.0 fs/nfs/Makefile:
+
+  - When CONFIG_ENFS is set, link enfs_adapter.o into nfs.ko.
+  - When CONFIG_ENFS is set, descend into the enfs/ subdirectory and
+    build enfs.ko there.
+
+Both files are dropped into fs/nfs/ at src-tree-build time by
+scripts/build-src-tree.sh.
+
+---
+ fs/nfs/Makefile | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+--- a/fs/nfs/Makefile
++++ b/fs/nfs/Makefile
+@@ -36,3 +36,8 @@ nfsv4-$(CONFIG_NFS_V4_2)	+= nfs42proc.o nfs42xattr.o
+ obj-$(CONFIG_PNFS_FILE_LAYOUT) += filelayout/
+ obj-$(CONFIG_PNFS_BLOCK) += blocklayout/
+ obj-$(CONFIG_PNFS_FLEXFILE_LAYOUT) += flexfilelayout/
++
++ifneq ($(CONFIG_ENFS),)
++	nfs-y += enfs_adapter.o
++endif
++obj-$(CONFIG_ENFS) += enfs/
