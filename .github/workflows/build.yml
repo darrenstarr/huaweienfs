@@ -10,9 +10,11 @@ permissions:
   contents: read
 
 jobs:
-  # 6.8 / 6.11 / 6.14 against Ubuntu 24.04 (noble) — public runner.
-  # noble has all three kernels in the archive, so a single runner OS
-  # covers the whole 24.04 LTS matrix.
+  # 6.8 + 6.14 against Ubuntu 24.04 (noble) — public runner.
+  # noble has both kernels in the archive, so a single runner OS covers
+  # the whole 24.04 LTS matrix.
+  # 6.11 is intentionally not in the matrix until vendor/ubuntu-6.11 +
+  # patches/ubuntu-6.11 land.
   build-noble:
     name: build (${{ matrix.target }})
     runs-on: ubuntu-24.04
@@ -23,9 +25,6 @@ jobs:
           - target: ubuntu-6.8
             kver-prefix: "6.8.0"
             headers: "linux-headers-generic"
-          - target: ubuntu-6.11
-            kver-prefix: "6.11.0"
-            headers: "linux-headers-6.11.0-29-generic"
           - target: ubuntu-6.14
             kver-prefix: "6.14.0"
             headers: "linux-headers-6.14.0-37-generic"
@@ -67,14 +66,14 @@ jobs:
             ls -lh "$ko"
           done
 
-  # 7.0 needs Ubuntu 26.04 ("plucky"), which doesn't have a public
-  # GitHub Actions runner yet — use the official plucky container on
-  # an ubuntu-24.04 runner.
-  build-plucky:
+  # 7.0 needs Ubuntu 26.04 ("resolute"), which doesn't have a public
+  # GitHub Actions runner yet — use the official 26.04 container on an
+  # ubuntu-24.04 runner.
+  build-resolute:
     name: build (ubuntu-7.0)
     runs-on: ubuntu-24.04
     container:
-      image: ubuntu:plucky
+      image: ubuntu:26.04
     steps:
       - uses: actions/checkout@v4
 
@@ -120,10 +119,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install dpkg-dev + lintian
+      - name: Install dpkg-dev + lintian + build-essential
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev debhelper dkms lintian
+          sudo apt-get install -y build-essential dpkg-dev debhelper dkms lintian
       - name: Build the .deb
         run: dpkg-buildpackage -us -uc -b
       - name: Stash artefact for inspection
