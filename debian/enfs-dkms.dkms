@@ -1,5 +1,0 @@
-PACKAGE_NAME="enfs"
-PACKAGE_VERSION="#MODULE_VERSION#"
-# Real dkms.conf is generated from dkms.conf.in at build time and shipped
-# under /usr/src/enfs-#MODULE_VERSION#/dkms.conf; this stub exists so
-# dh_dkms picks the package up and runs `dkms add` post-install.
