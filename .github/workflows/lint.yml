@@ -32,7 +32,6 @@ jobs:
         with:
           globs: |
             README.md
-            LICENSE
             docs/**/*.md
           config: .markdownlint.json
 
