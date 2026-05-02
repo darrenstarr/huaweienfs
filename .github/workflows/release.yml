@@ -18,7 +18,7 @@ jobs:
     name: build .deb and publish release
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install dpkg-dev + lintian + dh-dkms
         run: |
@@ -35,7 +35,7 @@ jobs:
           ls -lh dist/
 
       - name: Create release with auto-generated notes
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true

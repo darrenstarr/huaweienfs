@@ -29,7 +29,7 @@ jobs:
             kver-prefix: "6.14.0"
             headers: "linux-headers-6.14.0-37-generic"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install build deps + matching kernel headers
         run: |
@@ -75,7 +75,7 @@ jobs:
     container:
       image: ubuntu:26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install build deps + 7.0 headers
         run: |
@@ -118,7 +118,7 @@ jobs:
     name: build .deb
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install dpkg-dev + lintian + dh-dkms
         run: |
           sudo apt-get update
@@ -131,7 +131,7 @@ jobs:
           cp ../enfs-dkms_*.deb dist/
           ls -lh dist/
       - name: Stash artefact for inspection
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: enfs-dkms-deb
           path: dist/*.deb
