@@ -1,0 +1,21 @@
+#!/bin/sh
+# debian/postrm for enfs-dkms.
+#
+# dh_dkms generates the standard `dkms remove` block via #DEBHELPER#.
+# After that runs, our modules are gone from /lib/modules/.../updates/
+# but the cached initramfs still references them. Rebuild it so the
+# stock in-tree sunrpc/nfs/nfs_acl/lockd come back at boot.
+
+set -e
+
+#DEBHELPER#
+
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    KVER=$(uname -r)
+    if [ -x /usr/sbin/update-initramfs ] && [ -f "/boot/initrd.img-${KVER}" ]; then
+        echo "enfs-dkms postrm: rebuilding initramfs for ${KVER} so stock NFS modules load at next boot"
+        update-initramfs -u -k "${KVER}" || true
+    fi
+fi
+
+exit 0

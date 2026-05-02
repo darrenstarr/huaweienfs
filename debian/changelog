@@ -1,3 +1,16 @@
+enfs-dkms (0.1.4-1) noble; urgency=medium
+
+  * Postinst now does the manual steps that 0.1.3 forced users to
+    run by hand on Ubuntu 24.04: a `dkms install --force` to land
+    the modules whose stock copies are loaded (sunrpc, nfs_acl) and
+    `update-initramfs -u` so the patched modules load at boot.
+    A reboot is still required after install for the new initramfs
+    to take effect; postinst prints a reminder.
+  * Postrm rebuilds the initramfs on remove so stock NFS modules
+    load at next boot — restoring full rollback.
+
+ -- Darren <darren@example.invalid>  Sat, 02 May 2026 11:30:00 +0200
+
 enfs-dkms (0.1.3-1) noble; urgency=medium
 
   * Actually-installable .deb (verified by `apt install` on a fresh

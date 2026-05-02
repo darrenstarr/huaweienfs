@@ -1,0 +1,40 @@
+#!/bin/sh
+# debian/postinst for enfs-dkms.
+#
+# dh_dkms generates the standard `dkms add` block via #DEBHELPER#.
+# We then run two extra steps that the standard dkms.conf
+# REMAKE_INITRD / module-install flow can't handle for us:
+#
+#   1. Force-install the modules. On first install some of our six
+#      modules collide with stock copies that the running kernel
+#      already has open (sunrpc, nfs_acl). DKMS install silently
+#      skips those, leaving an inconsistent set in
+#      /lib/modules/.../updates/dkms/. A `dkms install --force`
+#      copies all six in.
+#
+#   2. Rebuild the initramfs so our DKMS sunrpc/nfs/nfs_acl/lockd
+#      load at boot before any service that grabs sunrpc (rpcbind,
+#      nfs-common). dkms.conf has REMAKE_INITRD="yes" but DKMS
+#      treats that as deprecated and ignores it.
+
+set -e
+
+#DEBHELPER#
+
+if [ "$1" = "configure" ]; then
+    KVER=$(uname -r)
+    PKG_VER=$(dpkg-query -W -f '${Version}' enfs-dkms 2>/dev/null | sed 's/-[0-9]*$//')
+
+    if [ -n "$PKG_VER" ] && [ -d "/var/lib/dkms/enfs/${PKG_VER}" ] && [ -d "/lib/modules/${KVER}" ]; then
+        echo "enfs-dkms postinst: forcing install for kernel ${KVER}"
+        dkms install enfs/${PKG_VER} -k "${KVER}" --force || true
+    fi
+
+    if [ -x /usr/sbin/update-initramfs ] && [ -f "/boot/initrd.img-${KVER}" ]; then
+        echo "enfs-dkms postinst: rebuilding initramfs for ${KVER}"
+        update-initramfs -u -k "${KVER}" || true
+        echo "enfs-dkms postinst: reboot recommended so DKMS modules load at boot"
+    fi
+fi
+
+exit 0
