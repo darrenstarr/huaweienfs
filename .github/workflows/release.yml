@@ -40,3 +40,30 @@ jobs:
           files: dist/*
           generate_release_notes: true
           fail_on_unmatched_files: true
+          body: |
+            ## Supported targets
+
+            This release builds and loads end-to-end on:
+
+            | Ubuntu          | Kernel series | Status                                  |
+            |-----------------|---------------|------------------------------------------|
+            | **26.04 LTS**   | 7.0.x         | GA target                                |
+            | **24.04 LTS HWE** | 6.14.x      | works (one-time `update-initramfs -u` after first install) |
+            | **24.04 LTS GA**  | 6.8.x       | works                                    |
+
+            Architectures: `amd64` (x86_64). aarch64 build coverage is
+            on the roadmap.
+
+            ## Install
+
+            ```bash
+            sudo apt install ./enfs-dkms_*.deb
+            sudo modprobe enfs
+            ```
+
+            See [`docs/user/00-quickstart.md`](https://github.com/darrenstarr/huaweienfs/blob/main/docs/user/00-quickstart.md)
+            for the 3-minute zero-to-mounted walkthrough.
+
+            ---
+
+            ## What's changed

@@ -5,7 +5,7 @@
 # scaffolding tasks (DKMS install/uninstall, Debian packaging, syncing
 # sources to the test VM, etc.).
 
-VERSION       ?= 0.1.1
+VERSION       ?= 0.1.2
 KVER          ?= $(shell uname -r)
 KDIR          ?= /lib/modules/$(KVER)/build
 DKMS_TREE     ?= /var/lib/dkms
