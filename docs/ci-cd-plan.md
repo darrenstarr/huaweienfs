@@ -60,6 +60,7 @@ Stays under 30 seconds. Fast feedback for trivial mistakes.
 
 `make port` materialises `src/` from `vendor/` + `compat/` +
 `patches/`. CI verifies:
+
 - the script exits 0,
 - `src/` contains the expected file count (`find src -type f | wc -l`
   matches a recorded baseline),
@@ -84,6 +85,7 @@ strategy:
 ```
 
 Each job:
+
 1. Adds the Ubuntu archive matching the matrix entry.
 2. `apt install build-essential dkms linux-headers-${{ matrix.kernel.headers }}`.
 3. `make port` then `make modules KVER=${{ matrix.kernel.headers }} KDIR=/lib/modules/${{ matrix.kernel.headers }}/build`.
@@ -104,6 +106,7 @@ build artefacts.
 ## `release`
 
 After `package` is green on a `v*` tag:
+
 - creates a GitHub Release with the tag's annotated message as the
   body,
 - attaches the `.deb` and a copy of `vendor/openeuler/UPSTREAM-REVISION`
@@ -128,6 +131,7 @@ in-tree `kunit.py` runner against UML.
 
 Tier-3 multipath tests need real LXD containers and a real bridge.
 Use a self-hosted runner registered against this repo:
+
 - runner machine: a small VM (or LXC container) on the build host
   with `lxd` group and access to `nfs-test-br0`,
 - runner user: a dedicated `gh-runner` system user with sudo to the

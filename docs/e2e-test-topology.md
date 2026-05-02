@@ -121,6 +121,7 @@ lxc stop nfs-srv-2 --force
 ```
 
 Assertions:
+
 - `tcpdump -i nfs-test-br0 'host 10.99.0.12'` shows zero packets
   to/from `.12` within **5 s** of the kill.
 - The remaining three servers' TX-byte rates rise; total client-side

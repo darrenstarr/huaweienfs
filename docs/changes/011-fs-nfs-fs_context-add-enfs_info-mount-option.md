@@ -10,7 +10,7 @@ mount syntax. All guarded by `CONFIG_ENFS`.
 
 The user-visible effect is a new mount-option vocabulary:
 
-```
+```bash
 mount -t nfs -o enfs_info=...,remoteaddrs=10.0.0.1~10.0.0.2,localaddrs=10.0.1.1 ...
 mount -t nfs -o slookupcache=...,alookupcache=... ...
 ```

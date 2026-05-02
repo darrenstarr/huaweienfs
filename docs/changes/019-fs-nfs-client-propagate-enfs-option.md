@@ -130,7 +130,7 @@ ret = ops->client_info_init((void *)&client->cl_multipath_data, ...);
 
 Verified end-to-end with:
 
-```
+```text
 $ cat /sys/kernel/sunrpc/xprt-switches/switch-X/xprt_switch_info
 num_xprts: N      <-- N matches the number of remoteaddrs in the mount option
 ```

@@ -89,7 +89,7 @@ the mount point — sometimes only the second or third one — fails with
 
 **Signature.**
 
-```
+```text
 dmesg:
 NFS: server <NFS_SERVER_2> error: fileid changed
 NFS: server <NFS_SERVER_2> not responding, still trying
@@ -104,7 +104,7 @@ sub-cause is that two servers export the same path but with different
 **Fix.** On every server in the `remoteaddrs=` set, ensure the export
 shares the same `fsid=`:
 
-```
+```text
 # /etc/exports on every server backing this multipath mount
 /<EXPORT>  *(rw,fsid=<SHARED_FSID>,no_subtree_check,...)
 ```
@@ -133,7 +133,7 @@ sudo modprobe enfs
 
 **Signature.**
 
-```
+```text
 dmesg:
 sunrpc: version magic '...' should be '...'
 enfs: disagrees about version of symbol ...
@@ -194,7 +194,7 @@ dkms status -m enfs
 
 The full build log lives at:
 
-```
+```text
 /var/lib/dkms/enfs/0.1.0/build/make.log
 ```
 
@@ -236,7 +236,7 @@ modinfo -n nfs              # updates/dkms/ for the current kernel
 
 **Signature.**
 
-```
+```text
 dmesg:
 nfs_acl: disagrees about version of symbol <some_symbol>
 nfs: Unknown symbol <some_symbol> (err -22)

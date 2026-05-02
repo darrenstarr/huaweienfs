@@ -105,13 +105,13 @@ modinfo -n nfs
 
 Before rollback (enfs active):
 
-```
+```text
 /lib/modules/7.0.0-15-generic/updates/dkms/nfs.ko
 ```
 
 After rollback (stock active):
 
-```
+```text
 /lib/modules/7.0.0-15-generic/kernel/fs/nfs/nfs.ko
 ```
 

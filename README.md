@@ -153,7 +153,7 @@ explicit `TARGET=` override.
 
 ### Layout
 
-```
+```text
 vendor/openeuler/         OpenEuler reference + the OE-only "new" files
                           (verbatim OpenEuler OLK-6.6 sources)
   fs/nfs/enfs/              the standalone enfs.ko sources [BUILT]

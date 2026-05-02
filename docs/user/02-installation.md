@@ -79,7 +79,7 @@ The build produces six kernel modules (`sunrpc.ko`, `nfs_acl.ko`,
 `lockd.ko`, `nfs.ko`, `nfsv3.ko`, `enfs.ko`) and DKMS installs them
 under:
 
-```
+```text
 /lib/modules/$(uname -r)/updates/dkms/
 ```
 
@@ -98,7 +98,7 @@ modinfo -n nfs
 
 Expected — note `updates/dkms/`, **not** `kernel/`:
 
-```
+```text
 /lib/modules/7.0.0-15-generic/updates/dkms/nfs.ko
 ```
 
@@ -118,7 +118,7 @@ dkms status -m enfs
 
 Expected — one row per installed kernel:
 
-```
+```text
 enfs/0.1.0, 7.0.0-15-generic, x86_64: installed
 ```
 

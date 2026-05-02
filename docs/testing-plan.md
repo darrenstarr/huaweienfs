@@ -27,6 +27,7 @@ state machine that decides "this transport is unhealthy", the mount
 option parser, path-list management, the round-robin selector.
 
 **Runs:** on every commit, in CI. Either:
+
 - a User-Mode-Linux kernel with `make ARCH=um kunit_defconfig &&
   ./tools/testing/kunit/kunit.py run --kernel_args=...`, or
 - inside the test VM via the `kunit_tool` script invoked over ssh.
@@ -49,6 +50,7 @@ remount add/remove correctness.
 runs them, captures output, and reports pass/fail in TAP format.
 
 **What it tests** (single host, the `enfs-dev` VM):
+
 - module load order: `modprobe sunrpc → nfs → enfs` is clean,
   `dmesg` has no warnings.
 - module unload order: reverse, also clean.
@@ -66,7 +68,8 @@ runs them, captures output, and reports pass/fail in TAP format.
 **Cost:** <60 s (no NFS server needed).
 
 **Layout:**
-```
+
+```text
 tests/
 ├── bats-helpers/
 │   ├── load.bash         # common setup
@@ -120,7 +123,8 @@ shared export.
 provision; tests run in seconds; teardown ~5 s.
 
 **Layout:**
-```
+
+```text
 tests/
 └── e2e/
     ├── lib/

@@ -55,7 +55,7 @@ Single-string equivalent of the two options above. Useful when you
 have to fit a multipath mount through a tool that mangles `=` or `,`
 inside option values.
 
-```
+```text
 -o enfs_info='remoteaddrs=<NFS_SERVER_1>~<NFS_SERVER_2>,localaddrs=<LOCAL_NIC_1>'
 ```
 
