@@ -9,23 +9,28 @@ Vcs-Git: https://example.invalid/enfs-dkms.git
 Vcs-Browser: https://example.invalid/enfs-dkms
 
 Package: enfs-dkms
-Architecture: amd64 arm64
+Architecture: all
 Depends:
  ${misc:Depends},
  dkms (>= 2.8),
  build-essential,
  linux-headers-generic | linux-headers
 Recommends: nfs-common
-Description: Enhanced NFS multipath client (DKMS source) for Ubuntu 26.04
+Description: Enhanced NFS multipath client (DKMS source) for Ubuntu 24.04 / 26.04
  enfs is the OpenEuler "Enhanced NFS" client, providing multipath mounts,
  round-robin RPC dispatch and transport failover on top of the in-tree
  Linux NFS client.
  .
  This package ships the source under /usr/src/enfs-<ver>/ and registers
- it with DKMS, which builds replacement nfs.ko, sunrpc.ko and the new
- enfs.ko on package install and on every kernel upgrade. The replacement
- modules are placed in /lib/modules/$(uname -r)/updates/ and take
- precedence over the in-tree Ubuntu modules.
+ it with DKMS, which builds replacement sunrpc.ko, nfs.ko, nfsv3.ko,
+ lockd.ko, nfs_acl.ko and the new enfs.ko on package install and on
+ every kernel upgrade. The replacement modules are placed in
+ /lib/modules/$(uname -r)/updates/ and take precedence over the in-tree
+ Ubuntu modules.
+ .
+ The package is `Architecture: all` because it ships only source —
+ DKMS performs the per-kernel arch-specific compile on the user's
+ machine. One .deb works on both amd64 and arm64.
  .
  Removing this package via "apt purge enfs-dkms" restores the stock
- Ubuntu nfs.ko and sunrpc.ko.
+ Ubuntu modules and rebuilds the initramfs accordingly.
