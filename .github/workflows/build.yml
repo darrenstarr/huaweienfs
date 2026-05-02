@@ -178,17 +178,20 @@ jobs:
           echo "kdir=/usr/src/linux-headers-$KVER" >> "$GITHUB_OUTPUT"
           echo "Using KVER=$KVER  KDIR=/usr/src/linux-headers-$KVER"
 
-      - name: Rebuild host build tools (fixdep) for amd64
+      - name: Rebuild host build tools (fixdep, genksyms, modpost) for amd64
         run: |
           # The linux-headers-...-generic:arm64 package ships
-          # scripts/basic/fixdep as an aarch64 ELF, which won't run
-          # on the amd64 CI runner ("Exec format error"). Rebuild
-          # the basic scripts using HOSTCC (= host gcc, amd64) so
-          # the cross-build can use them.
+          # scripts/basic/fixdep, scripts/genksyms/genksyms,
+          # scripts/mod/modpost (etc.) as aarch64 ELFs, which won't
+          # run on the amd64 CI runner ("Exec format error"). Rebuild
+          # them using HOSTCC (= host gcc, amd64). `make scripts`
+          # covers all of them.
           sudo make -C ${{ steps.kver.outputs.kdir }} \
               ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-              scripts_basic
-          file ${{ steps.kver.outputs.kdir }}/scripts/basic/fixdep
+              scripts
+          file ${{ steps.kver.outputs.kdir }}/scripts/basic/fixdep \
+               ${{ steps.kver.outputs.kdir }}/scripts/genksyms/genksyms \
+               ${{ steps.kver.outputs.kdir }}/scripts/mod/modpost
 
       - name: Port source tree
         run: make port TARGET=${{ matrix.target }}
