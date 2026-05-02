@@ -180,23 +180,21 @@ jobs:
 
       - name: Rebuild host build tools (fixdep, genksyms, modpost) for amd64
         run: |
-          # The linux-headers-...-generic:arm64 package ships
-          # scripts/basic/fixdep, scripts/genksyms/genksyms,
-          # scripts/mod/modpost (etc.) as aarch64 ELFs, which won't
-          # run on the amd64 CI runner ("Exec format error"). Rebuild
-          # those three using HOSTCC (= host gcc, amd64).
-          #
-          # We can't use the broad `make scripts` target — that pulls
-          # in scripts/selinux/genheaders which needs classmap.h
-          # (not shipped in linux-headers-*). Stick to the three
-          # tools an out-of-tree module build actually invokes.
+          # The linux-headers-...-generic:arm64 package ships several
+          # host-side build tools as aarch64 ELFs which won't run on
+          # the amd64 CI runner ("Exec format error"). Delete the
+          # arm64 copies so make has to rebuild them via HOSTCC
+          # (= amd64 gcc on the runner).
           K=${{ steps.kver.outputs.kdir }}
+          sudo rm -f "$K"/scripts/basic/fixdep \
+                     "$K"/scripts/genksyms/genksyms \
+                     "$K"/scripts/genksyms/*.o \
+                     "$K"/scripts/mod/modpost \
+                     "$K"/scripts/mod/*.o
           sudo make -C "$K" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
               scripts_basic
           sudo make -C "$K" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-              M=scripts/genksyms scripts/genksyms/genksyms
-          sudo make -C "$K" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-              M=scripts/mod scripts/mod/modpost
+              prepare
           file "$K"/scripts/basic/fixdep \
                "$K"/scripts/genksyms/genksyms \
                "$K"/scripts/mod/modpost
