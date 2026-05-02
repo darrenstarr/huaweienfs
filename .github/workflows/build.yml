@@ -185,16 +185,27 @@ jobs:
           # the amd64 CI runner ("Exec format error"). Delete the
           # arm64 copies so make has to rebuild them via HOSTCC
           # (= amd64 gcc on the runner).
+          #
+          # We can't use the broad `make scripts` / `make prepare`
+          # targets — they recurse into scripts/selinux which needs
+          # security/selinux/include/classmap.h, not shipped in
+          # linux-headers-*. Build each tool individually via its
+          # subdir Makefile.host plumbing.
           K=${{ steps.kver.outputs.kdir }}
           sudo rm -f "$K"/scripts/basic/fixdep \
                      "$K"/scripts/genksyms/genksyms \
                      "$K"/scripts/genksyms/*.o \
                      "$K"/scripts/mod/modpost \
                      "$K"/scripts/mod/*.o
+          # scripts_basic (just fixdep + bin2c) doesn't recurse — safe.
           sudo make -C "$K" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
               scripts_basic
+          # genksyms + modpost via Makefile.build directly, scoped to
+          # their subdir so we don't trip over scripts/selinux.
           sudo make -C "$K" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-              prepare
+              -f "$K"/scripts/Makefile.build obj=scripts/genksyms
+          sudo make -C "$K" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+              -f "$K"/scripts/Makefile.build obj=scripts/mod
           file "$K"/scripts/basic/fixdep \
                "$K"/scripts/genksyms/genksyms \
                "$K"/scripts/mod/modpost
