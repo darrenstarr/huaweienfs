@@ -193,24 +193,11 @@ static void nfs3_xdr_enc_extend3args(struct rpc_rqst *req,
 }
 ```
 
-Walk-through:
-
-1. `encArg` is the carrier struct (defined by patch 0008 — see
-   §6.5). It has three fields: `maxsize` (set by the caller, used
-   only on decode for bounds check), `buflen` (actual bytes to
-   send), and `pBuf` (the opcode-dispatched payload that
-   `exten_call.c` built).
-2. `WARN_ON_ONCE` is a runtime sanity check — caller is supposed to
-   fit within `EXTEND_CMD_MAX_BUF_LEN`. If they don't, the WARN
-   fires once and we still try to encode (the kernel will splat
-   later when the xdr_buf overflows).
-3. `xdr_reserve_space(xdr, 4 + buflen)` reserves the bytes:
-   `4` for the XDR length prefix plus `buflen` for the payload.
-4. `xdr_encode_opaque` writes the length-prefixed bytes. It also
-   handles the trailing zero-pad to the next 4-byte boundary
-   automatically.
-
-That's the entire encoder. It's a length-prefixed opaque write.
+That's it. `WARN_ON_ONCE` is a runtime sanity check (caller must fit
+within `EXTEND_CMD_MAX_BUF_LEN`); `xdr_reserve_space` reserves
+4 bytes for the length prefix + the payload; `xdr_encode_opaque`
+writes the length-prefixed bytes including the trailing zero-pad to
+the next 4-byte boundary.
 
 ### Decoder
 
@@ -253,38 +240,23 @@ out_default:
 Walk-through:
 
 1. **NFS3 status word.** Every NFSv3 reply starts with a 4-byte
-   `nfsstat3` enum. `decode_nfsstat3` is a stock helper. If the
-   status is not `NFS3_OK` (zero), we map it to a kernel `-Exxx`
-   errno via `nfs_stat_to_errno`. This is how the server tells us
-   "I don't speak EXTEND" — typically `NFS3ERR_NOTSUPP` (returned
-   by stock Linux nfsd for any unknown procedure).
-2. **Pre-clear the buffer.** `memset(decArg->pBuf, 0, decArg->maxsize)`
-   wipes the caller-provided buffer. This is a defensive measure —
-   if a partial decode then errors out, the caller doesn't see
-   stale data from a previous reply.
-3. **Length prefix.** Read 4 bytes, byte-swap, that's the payload
-   length.
-4. **Bounds check against `decArg->maxsize`.** This is the critical
-   check. `maxsize` is set by the caller of `dorado_extend_op`
-   (always `EXTEND_CMD_MAX_BUF_LEN` in current usage). A
-   server-side bug or hostile server that sends a length larger
-   than this gets `-E2BIG` and is rejected here, before the bytes
-   are copied. **No buffer overrun is possible** even if the
-   server sends a 4 GiB length-prefix — `xdr_inline_decode` would
-   itself fail to find that many bytes and return `NULL`.
-5. **Copy into the caller's buffer.** Up to `length` bytes,
-   `length` already bounded by `maxsize`. Caller learns the actual
-   length via the updated `decArg->buflen`.
+   `nfsstat3`. Non-OK is mapped to `-Exxx` via `nfs_stat_to_errno` —
+   this is how the server tells us "I don't speak EXTEND".
+2. **Pre-clear the buffer** so a partial decode that then errors out
+   doesn't leak stale data from a previous reply.
+3. **Length prefix** read and byte-swapped.
+4. **Bounds check against `decArg->maxsize`** (always
+   `EXTEND_CMD_MAX_BUF_LEN` in current usage). A server bug or
+   hostile server sending an oversize length gets `-E2BIG` here,
+   before any bytes are copied. **No buffer overrun is possible**
+   even on a 4 GiB length prefix — `xdr_inline_decode` would itself
+   fail to find that many bytes.
+5. **Copy** up to `length` bytes; caller learns actual length via
+   `decArg->buflen`.
 
-So the decoder's contract with its caller is:
-
-- Returns 0: `decArg->pBuf` contains `decArg->buflen` valid bytes.
-- Returns `-E2BIG`: server sent more than we'd accept. Caller's
-  buffer was zeroed.
-- Returns `nfs_stat_to_errno(status)`: server didn't return OK.
-  Common values are `-ENOTSUPP` (server doesn't know EXTEND),
-  `-EOPNOTSUPP`, `-EPERM`, etc.
-- Returns `-EIO`: XDR underflow (truncated reply).
+Caller contract: 0 = success, `-E2BIG` = oversize, `-EIO` = XDR
+underflow, otherwise the mapped NFS3 status (commonly `-EOPNOTSUPP`
+when the server doesn't know EXTEND).
 
 ## 6.5 The carrier struct (`struct nfs_extend_xdr_arg`)
 

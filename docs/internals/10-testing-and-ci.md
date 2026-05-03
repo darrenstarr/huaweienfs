@@ -29,29 +29,17 @@ PR merge to be accepted (branch protection — see §10.5).
 ### `lint.yml` — four jobs
 
 - **`shellcheck`** runs `ludeeus/action-shellcheck@2.0.0` over
-  `scripts/`. Severity threshold is `warning`; `SC1091` (file not
-  found by shellcheck — typically a sourced file outside the repo)
-  is suppressed because `secrets/local-env.sh` is gitignored.
+  `scripts/`. Severity `warning`; `SC1091` is suppressed because the
+  developer-local `secrets/local-env.sh` is gitignored.
 - **`markdownlint`** runs `DavidAnson/markdownlint-cli2-action@v23`
-  over `README.md` and `docs/**/*.md` with the project's own
-  `.markdownlint.json` config.
-- **`make-help`** is a one-line job that runs `make help` to verify
-  the Makefile parses. Catches accidental syntax errors that would
-  make every other Makefile target unrunnable.
-- **`secret-leak-guard`** runs the same regex that
-  [`CLAUDE.md`](../../CLAUDE.md) (gitignored, developer-local) tells
-  the AI agent to run before commit:
-
-  ```bash
-  git ls-files | grep -v '^vendor/' | grep -v '^.github/workflows/lint.yml$' \
-    | xargs grep -nE '10\.200\.|10\.27\.|10\.2\.0\.4|/opt/data/vms|/mnt/ramdisk|Minions12345|52:54:00:e2:60:33|4c:00:82:f3:84:c1'
-  ```
-
-  This is the belt-and-braces guard against private LAN IPs,
-  hostnames, MAC addresses, and the developer's local-VM password
-  ever landing in a tracked file. The workflow file itself is
-  excluded because it legitimately mentions the patterns it greps
-  for.
+  over `README.md` and `docs/**/*.md` with the repo's
+  `.markdownlint.json`.
+- **`make-help`** runs `make help` to verify the Makefile parses.
+- **`secret-leak-guard`** greps tracked files for private LAN IPs,
+  hostnames, MAC addresses, and developer-VM passwords. Excludes
+  `vendor/` (upstream sources) and the workflow file itself (which
+  mentions the patterns it greps for). Belt-and-braces against the
+  patterns ever landing in a public commit.
 
 ### `build.yml` — three matrices
 
@@ -179,41 +167,21 @@ hand-templated body.
 
 GitHub-hosted runner images lag distro releases. At the time
 `build.yml` was written, no `ubuntu-26.04` runner image existed.
-The container workaround (`runs-on: ubuntu-24.04` + `container:
-image: ubuntu:26.04`) keeps the job working without waiting for the
-runner image. The same container image is what apt installs are
-tested against (the 26.04 kernel headers, dpkg, dkms, etc.).
-
-When a public 26.04 runner ships, `build-resolute` becomes:
-
-```yaml
-runs-on: ubuntu-26.04
-# remove `container:` block
-```
-
-…and the job is otherwise unchanged. Until then, the container is
-not a workaround for performance reasons (overhead is small) but for
-availability.
+`runs-on: ubuntu-24.04` + `container: image: ubuntu:26.04` keeps the
+job working without waiting. When a public 26.04 runner ships, the
+job becomes `runs-on: ubuntu-26.04` minus the `container:` block.
 
 ## 10.3 Why `ubuntu-24.04-arm` for arm64
 
-Three options were considered:
-
-1. **QEMU + binfmt on amd64 runners.** Used previously. 20–50 min
-   per job. Slow because the entire toolchain runs under emulation.
-2. **Self-hosted arm64 runner.** Free of GitHub limits, but
-   requires hosting infrastructure that the project doesn't have.
-3. **`ubuntu-24.04-arm` (Ampere Altra public runners).** Native
-   arm64 build at ~2 min per job. The current choice.
+Three options were considered: QEMU+binfmt on amd64 (20–50 min per
+job — slow), self-hosted arm runners (no infra), or
+`ubuntu-24.04-arm` Ampere Altra public runners (native, ~2 min). We
+took the third.
 
 The tradeoff: hosted arm runners are sandboxed VMs. They will not
-load arbitrary kernel modules (the running kernel was built and
-signed by GitHub; ours is foreign). Build coverage is full;
-on-target *load* coverage is not.
-
-That gap is filled by the `enfs-dev-24-arm64` test VM (§10.7) where
-a real arm64 kernel can `modprobe enfs` against a real `linux-headers-*`
-installed by DKMS.
+load arbitrary kernel modules (their running kernel is GitHub's;
+ours is foreign). Build coverage is full; on-target *load* coverage
+is not. The `enfs-dev-24-arm64` test VM (§10.7) fills the gap.
 
 ## 10.4 Lazy vendor fetch
 
@@ -374,46 +342,28 @@ push the tag.
 
 ## 10.9 The manual mount-test procedure
 
-The end-to-end functional verification — "does multipath actually
-multipath" — is a manual procedure documented in
-[`docs/user/04-operations.md`](../user/04-operations.md) and the
-e2e test topology under [`docs/e2e-test-topology.md`](../e2e-test-topology.md).
-The short form:
+End-to-end functional verification ("does multipath actually
+multipath") is a manual procedure documented in
+[`docs/user/04-operations.md`](../user/04-operations.md) and the e2e
+topology under [`docs/e2e-test-topology.md`](../e2e-test-topology.md).
+Short form:
 
-1. Stand up at least two NFS server endpoints exporting the same
-   share. The project's e2e topology uses LXC containers running
-   `nfs-kernel-server` for this.
-2. On the client, after install:
+1. Stand up two or more NFS server endpoints exporting the same
+   share (the e2e topology uses LXC containers).
+2. Mount with `vers=3,enfs_info=...,remoteaddrs=A~B~C,localaddrs=L`.
+3. `cat /sys/kernel/sunrpc/xprt-switches/switch-*/xprt_switch_info`
+   — look for `num_xprts: N` matching the number of `remoteaddrs`.
+4. Run a multi-MiB `dd` from the mount while watching `tcpdump`.
+   Each transport should see a roughly even fraction of the RPCs.
+5. Drop the network on one server (`iptables -A INPUT -s <client>
+   -j DROP` on the victim). I/O continues — failover (chapter 5)
+   reroutes in-flight RPCs.
+6. Restore the dropped server. pm_ping (chapter 4) re-detects it
+   and the round-robin includes it again.
 
-   ```bash
-   sudo mount -t nfs \
-       -o vers=3,enfs_info=...,remoteaddrs=A~B~C,localaddrs=L \
-       server.example.com:/exp /mnt
-   ```
-
-3. Inspect:
-
-   ```bash
-   cat /sys/kernel/sunrpc/xprt-switches/switch-*/xprt_switch_info
-   ```
-
-   Look for `num_xprts: N` matching the number of `remoteaddrs`.
-4. Run a multi-MiB read (`dd if=/mnt/bigfile of=/dev/null bs=1M
-   count=1024`) while watching `tcpdump -i any -nn 'port 2049'` on
-   the client. Each transport in the switch should see a roughly
-   even fraction of the RPCs.
-5. Pull the network on one of the servers (`iptables -A INPUT -s
-   <client> -j DROP` on the chosen victim). I/O on the client
-   should continue without stalling — the failover state machine
-   (chapter 5) reroutes the in-flight RPCs to the surviving paths.
-6. Restore the dropped server. Eventually pm_ping (chapter 4)
-   re-detects it as live and the round-robin starts including it
-   again.
-
-This procedure is what the developer runs before cutting a release
-that bumps the second-or-third version digit. It is not in CI
-because it requires multi-host network setup that GitHub-hosted
-runners can't provide.
+Run this before cutting a release that bumps the second or third
+version digit. Not in CI because it requires multi-host network
+setup hosted runners can't provide.
 
 ## 10.10 What's automated, what isn't, and what's pending
 

@@ -38,57 +38,37 @@ let the rest of the series compile.
 
 ### Patch 0001 — `fs/nfs/Makefile`: build enfs
 
-Two trailing lines appended to `fs/nfs/Makefile`:
-
-```make
-ifneq ($(CONFIG_ENFS),)
-        nfs-y += enfs_adapter.o
-endif
-obj-$(CONFIG_ENFS) += enfs/
-```
-
-The first link `enfs_adapter.o` (the registry that `enfs.ko` plugs
-into at runtime) into `nfs.ko`. The second descends into the
-`fs/nfs/enfs/` subdirectory to build `enfs.ko` itself. Both files are
-dropped into place by `scripts/build-src-tree.sh` from
-`vendor/openeuler/`. Verbatim port from
-`vendor/openeuler/fs/nfs/Makefile`. Long form:
+Two trailing lines: `nfs-y += enfs_adapter.o` (under `ifneq
+($(CONFIG_ENFS),)`) and `obj-$(CONFIG_ENFS) += enfs/`. The first
+links the adapter (the registry `enfs.ko` plugs into) into
+`nfs.ko`; the second descends into `fs/nfs/enfs/` to build
+`enfs.ko`. Verbatim port from `vendor/openeuler/fs/nfs/Makefile`.
+Long form:
 [`docs/changes/001-fs-nfs-Makefile-build-enfs.md`](../changes/001-fs-nfs-Makefile-build-enfs.md).
 
 ### Patch 0002 — `net/sunrpc/Makefile`: build sunrpc_enfs_adapter
 
-A single line appended:
-
-```make
-sunrpc-$(CONFIG_SUNRPC_ENFS) += sunrpc_enfs_adapter.o
-```
-
-Compiles `sunrpc_enfs_adapter.o` (which provides
+One line: `sunrpc-$(CONFIG_SUNRPC_ENFS) += sunrpc_enfs_adapter.o`.
+Compiles the adapter (which provides
 `rpc_multipath_ops_register/unregister/get/put` plus thin wrappers
 called from `clnt.c` / `xprt.c` after patches 0013/0014) into
-`sunrpc.ko`. The registry must live in `sunrpc.ko` rather than
-`enfs.ko` because the per-RPC dispatch path calls into it on every
-RPC and cannot tolerate "maybe an out-of-tree module will resolve
-this later." Long form:
+`sunrpc.ko`. The registry must live in `sunrpc.ko` so the per-RPC
+dispatch path can call it inline. Long form:
 [`docs/changes/002-...md`](../changes/002-net-sunrpc-Makefile-build-sunrpc_enfs_adapter.md).
 
 ### Patch 0003 — `fs/nfs/Kconfig`: `CONFIG_ENFS`
 
-Adds two stanzas to `fs/nfs/Kconfig`: `config ENFS` (tristate,
-depends on `NFS_FS` and `X86 || X86_64 || ARM64`, `select`s
-`SUNRPC_ENFS`) and `config ENFS_KUNIT_TEST` (preserved verbatim from
-OE so re-syncs are clean; tests are not currently built). The
-`select` arrow makes the SunRPC half of enfs auto-enable when the
-NFS half is. Long form:
+Adds `config ENFS` (tristate, depends on `NFS_FS` and `X86 || X86_64
+|| ARM64`, `select`s `SUNRPC_ENFS`) plus `config ENFS_KUNIT_TEST`
+(preserved verbatim from OE; tests not currently built). The
+`select` arrow auto-enables the SunRPC half. Long form:
 [`docs/changes/003-...md`](../changes/003-fs-nfs-Kconfig-add-CONFIG_ENFS.md).
 
 ### Patch 0004 — `net/sunrpc/Kconfig`: `CONFIG_SUNRPC_ENFS`
 
-The SunRPC counterpart. `bool` (not tristate) because all the
-conditional code lives inside `sunrpc.ko` itself. Three downstream
-patches gate on this symbol: 0002 (the Makefile line),
-0005 (the struct fields in `clnt.h`), and 0006 (the `RPC_TASK_*`
-flags in `sched.h`). Long form:
+The SunRPC counterpart. `bool` (not tristate) because the conditional
+code lives inside `sunrpc.ko`. Gated by patches 0002, 0005, and
+0006. Long form:
 [`docs/changes/004-...md`](../changes/004-net-sunrpc-Kconfig-add-CONFIG_SUNRPC_ENFS.md).
 
 ## 8.2 Header surgery (0005–0009)
@@ -145,42 +125,35 @@ log lines or pings that get unexpectedly rerouted.
 
 ### Patch 0007 — `include/linux/nfs_fs_sb.h`: enfs fields
 
-Three additions to the public NFS-client header, all wrapped in
-`#if !defined(__GENKSYMS__) && IS_ENABLED(CONFIG_ENFS)`:
-
-- `struct nfs_client::cl_multipath_data` (`void *`) — slot for
-  enfs's per-`nfs_client` state.
-- `struct nfs_server::enfs_flags` (`int`) — bitfield for
-  `ENFS_SERVER_FLAG_*` (lookup-cache mode, capability-probe state).
-- Two `static inline` refcount helpers `nfsclient_refinc` /
-  `nfsclient_refdec`.
-
-The genksyms guard is essential because `nfs.ko`'s public exports
-mention `struct nfs_client *` and `struct nfs_server *` — every
-consumer (`nfsv3.ko`, `nfsv4.ko`, `nfsd.ko` if installed) would fail
-to load otherwise. Long form:
+Three additions, all under `#if !defined(__GENKSYMS__) &&
+IS_ENABLED(CONFIG_ENFS)`: `struct nfs_client::cl_multipath_data`
+(`void *`, slot for per-`nfs_client` enfs state),
+`struct nfs_server::enfs_flags` (`int`, bitfield for
+`ENFS_SERVER_FLAG_*`), and two `static inline` refcount helpers
+`nfsclient_refinc` / `nfsclient_refdec`. The genksyms guard is
+essential because `nfs.ko`'s exports mention these structs — every
+consumer (`nfsv3.ko`, `nfsv4.ko`, `nfsd.ko`) would fail to load
+otherwise. Long form:
 [`docs/changes/007-...md`](../changes/007-include-nfs_fs_sb-add-enfs-fields.md).
 
 ### Patch 0008 — `include/linux/nfs_xdr.h`: `nfs_extend_xdr_arg`
 
 Adds a small XDR carrier struct (`maxsize`, `buflen`, `pBuf`) to a
-public header so that both the encoder/decoder pair (added by patch
-0012) inside `nfs.ko` *and* the caller in
-`fs/nfs/enfs/exten_call.c` inside `enfs.ko` see the same layout.
+public header so the encoder/decoder pair (patch 0012) in `nfs.ko`
+and the caller in `enfs.ko` (`exten_call.c`) see the same layout.
 Wrapped in `#if IS_ENABLED(CONFIG_ENFS)`. No exported symbol
-mentions this struct, so genksyms is not at risk here. Long form:
+mentions the struct, so genksyms is unaffected. Long form:
 [`docs/changes/008-...md`](../changes/008-include-nfs_xdr-add-extend-xdr-arg.md).
 
 ### Patch 0009 — `fs/nfs/internal.h`: `enfs_option` slots
 
-Adds two `void *enfs_option` slots (private, `internal.h`), one on
+Adds two `void *enfs_option` slots, one on
 `struct nfs_client_initdata` and one on `struct nfs_fs_context`.
-These are the middle stops in the propagation chain (chapter 3) that
-carries a parsed `enfs_info=` from the mount-option parser through
-to the `rpc_create_args::multipath_option` field added in 0005.
-Patch 0019 closes the loop by actually doing the copy. `internal.h`
-is private to `fs/nfs/` so genksyms does not enter the picture. Long
-form:
+The middle stops in the propagation chain (chapter 3) that carries a
+parsed `enfs_info=` from the mount-option parser to
+`rpc_create_args::multipath_option` (slot from 0005). Patch 0019
+closes the loop. `internal.h` is private to `fs/nfs/` so genksyms is
+unaffected. Long form:
 [`docs/changes/009-...md`](../changes/009-fs-nfs-internal-add-enfs-option-fields.md).
 
 ## 8.3 NFS plumbing (0010–0011)
@@ -277,63 +250,54 @@ Eight sites in the RPC client core (full table:
 [`docs/changes/013-...md`](../changes/013-net-sunrpc-clnt-multipath-hooks.md)).
 Highlights:
 
-- `rpc_multipath_ops_create_clnt(args, clnt)` after `rpc_new_client`
-  succeeds, so enfs can attach per-client multipath state.
-- `rpc_multipath_ops_releas_clnt(clnt)` in `rpc_shutdown_client`
-  (yes, the typo "releas" — missing "e" — is preserved verbatim from
-  OE so the adapter `.c` file we vendor still links; renaming would
-  touch three files).
+- `rpc_multipath_ops_create_clnt(args, clnt)` and
+  `rpc_multipath_ops_releas_clnt(clnt)` (yes, the typo "releas" is
+  preserved from OE — renaming would touch three files) bracket the
+  client lifecycle.
 - `rpc_multipath_ops_inc_queuelen(xprt)` /
-  `rpc_multipath_ops_dec_queuelen(xprt)` so enfs's per-xprt queue
-  depth counter stays in sync with SunRPC's.
-- `rpc_multipath_ops_set_transport(task, clnt)` in
-  `rpc_task_set_transport` so enfs can override stock xprt selection
-  for tasks that came from enfs (`RPC_TASK_ENFS` bit set).
-- `RPC_MULTIPAHT_UPDATE_RPC_PROC(task, p, clnt)` macro replacing the
+  `rpc_multipath_ops_dec_queuelen(xprt)` keep enfs's per-xprt queue
+  counter in sync with SunRPC's.
+- `rpc_multipath_ops_set_transport(task, clnt)` lets enfs override
+  stock xprt selection for tasks marked `RPC_TASK_ENFS`.
+- `RPC_MULTIPAHT_UPDATE_RPC_PROC(task, p, clnt)` (macro) replaces the
   fixed `cl_prog` / `cl_vers` writes in the call-header encoder.
-  This is the per-RPC hot path; the macro inlines so there is zero
-  added function-call overhead when the multipath_option pointer is
-  NULL (i.e. for non-multipath clients).
+  Inlines to zero overhead when `multipath_option` is NULL.
 - `rpc_multipath_switch_set_roundrobin(clnt, xps)` falls through to
   the stock helper when no multipath is registered.
 
 **Two hooks deferred.** OE's 6.6 tree has additional
-`case -ETIMEDOUT` failover hooks in `call_status` and `call_refresh`.
-Both depend on a local `failover` boolean not present in 7.0; the
-site mapping is more invasive than the rest. Net effect: failover-
-on-timeout for stuck transports is partially degraded — the
-load-balancing and initial-mount paths work, but a permanently-down
-transport will not be retired automatically by these hooks alone.
-The pm_ping subsystem (chapter 4) catches this case, so the
-practical impact is delayed rather than absent.
+`case -ETIMEDOUT` failover hooks in `call_status` and `call_refresh`
+that depend on a local `failover` boolean not present in 7.0. Site
+mapping is invasive; deferred. Net effect: failover-on-timeout for
+stuck transports is partially degraded — load-balancing and
+initial-mount work, but a permanently-down transport is not retired
+by these hooks. pm_ping (chapter 4) catches the case eventually, so
+the impact is delayed rather than absent.
 
 ### Patch 0014 — `net/sunrpc/xprt.c`: 7 hook sites
 
 Seven sites in the xprt layer (full table:
 [`docs/changes/014-...md`](../changes/014-net-sunrpc-xprt-multipath-hooks.md)).
-The notable ones:
+Notable:
 
-- Three `out_sleep:` paths (in `xprt_reserve_xprt_cong`,
-  `xprt_reserve_xprt`, `xprt_wait_for_buffer_space`) call
+- Three `out_sleep:` paths call
   `rpc_multipath_ops_adjust_task_timeout(task, NULL)` *before* the
   sleep so enfs can recompute the per-path timeout against the new
-  transport's RTT estimate. Without this, slow paths would inherit
-  fast paths' tight timeouts and time out prematurely.
+  transport's RTT — without this, slow paths inherit fast paths'
+  tight timeouts.
 - `xprt_alloc_slot` calls `rpc_multipath_ops_init_task_req(task,
-  req)` so enfs can stamp the rqst with multipath bookkeeping in the
-  only safe slot before the rqst is visible to other CPUs.
-- `xprt_create_transport` replaces the unconditional
-  `kstrdup(args->servername, ...)` with
-  `rpc_multipath_set_servername(...)` (which can reserve extra leading
-  bytes for an `"<idx>:<name>"` prefix that enfs uses to tell
-  siblings apart). It also calls `rpc_multipath_ops_create_xprt(xprt)`
-  and bails out cleanly on ENOMEM.
-- `xprt_destroy` matches with `rpc_multipath_free_servername(xprt)`.
+  req)` to stamp the rqst with multipath bookkeeping in the only
+  safe slot before the rqst is visible to other CPUs.
+- `xprt_create_transport` replaces the stock `kstrdup(...,
+  servername)` with `rpc_multipath_set_servername(...)` — enfs needs
+  to reserve extra leading bytes for an `"<idx>:<name>"` prefix to
+  tell siblings apart. Also calls `rpc_multipath_ops_create_xprt`
+  and bails on ENOMEM. `xprt_destroy` mirrors with
+  `rpc_multipath_free_servername(xprt)`.
 
-All seven ported cleanly — no deferred hooks, no deviations. The
-only externally observable effect is the synthetic servername
-(`0:server`, `1:server`, ...) visible in
-`/sys/kernel/debug/sunrpc/rpc_xprt/...`.
+All seven ported cleanly — no deferred hooks. The only externally
+observable effect is the synthetic servername (`0:server`,
+`1:server`, ...) in `/sys/kernel/debug/sunrpc/rpc_xprt/...`.
 
 ## 8.6 Header guard + exports (0015–0018)
 

@@ -14,10 +14,10 @@
 > Plus the timeout shortening that gives failover a chance to fire in
 > the first place: `failover_time.c`.
 >
-> All four files are part of `enfs.ko`. None of them touch `sunrpc.ko`
-> or `nfs.ko` directly — they react via the `rpc_multipath_ops` vtable
-> registered at module init (chapter 4 §4.3). Locking interactions
-> with the SunRPC scheduler are deferred to chapter 7.
+> All four files live in `enfs.ko`; they react via the
+> `rpc_multipath_ops` vtable registered at module init (chapter 4
+> §4.3). Locking interactions with the SunRPC scheduler are deferred
+> to chapter 7.
 
 ## 5.1 The three actors
 
@@ -55,11 +55,11 @@ flowchart LR
     class FP,FR reader
 ```
 
-Two things flow only one way: **`pm_ping` is the only thing that
-clears `PM_STATE_FAULT`** (by promoting the xprt back to NORMAL or
-UNSTABLE), and **`failover_handle` is the only thing in the IO
-path that sets `PM_STATE_FAULT`**. The dispatcher (chapter 4 §4.6)
-is purely a reader — it never writes state.
+Two one-way flows: **`pm_ping` is the only thing that clears
+`PM_STATE_FAULT`** (promoting back to NORMAL or UNSTABLE), and
+**`failover_handle` is the only thing in the IO path that sets
+`PM_STATE_FAULT`**. The dispatcher (chapter 4 §4.6) is purely a
+reader.
 
 ## 5.2 The state machine
 
@@ -122,19 +122,15 @@ else
 ```
 
 In other words: a path is NORMAL only if its reconnect ring has
-drained. `enfs_test_reconnect_time` (`pm_ping.c:196`, gated on
-`CONFIG_ENFS_KUNIT_TEST`) walks through the four edge cases as a
-unit test.
+drained.
 
 The authoritative writer is `pm_set_path_state(xprt, state)`
-(`pm_state.c:74`). It's an `atomic_set` under an `xprt_get/put`
-pair; the only side-effect besides the state mutation is a one-line
-log at INFO level reporting the transition with the formatted
-local/remote IPs (line 120-122). Chapter 7 covers the locking
-properties — for now the takeaway is that state transitions are
-RCU-safe and lock-free, and reads can race with writes (we
-explicitly accept that — pm_ping running concurrently with
-failover_handle setting FAULT can cause one redundant probe).
+(`pm_state.c:74`) — an `atomic_set` under `xprt_get/put`. Only
+side-effect besides the state mutation is one INFO log line per
+genuine transition. Chapter 7 covers the locking properties; for now
+the takeaway is that state transitions are RCU-safe and lock-free,
+reads can race with writes, and we accept that (pm_ping racing
+failover_handle can cost one redundant probe at worst).
 
 ## 5.3 `pm_ping`: the liveness prober
 
@@ -174,21 +170,17 @@ not the probe rate.
 
 ### What gets probed
 
-`pm_ping_loop_sunrpc_net` (line 447) walks every netns via
-`for_each_net_rcu`. For each one, it grabs the `sunrpc_net` and
-calls `pm_ping_loop_rpclnt`, which walks `sn->all_clients` filtered
-by `cl_enfs == 1` (line 436), and for each enfs client calls
-`rpc_clnt_iterate_for_each_xprt(clnt, pm_ping_execute_xprt_test, ...)`.
-That terminates at `pm_ping_add_work` (line 339), which queues a
-work item onto `ping_execute_workq` if the per-xprt
-`path_check_state` is `INIT` or `FINISH` and the
-`ENFS_PM_PING_TMIE_OUT = 3` second cooldown has elapsed since the
-last probe (line 367-370).
+`pm_ping_loop_sunrpc_net` (line 447) walks every netns, then every
+client in `sn->all_clients` filtered by `cl_enfs == 1` (line 436),
+then every xprt of each via `rpc_clnt_iterate_for_each_xprt`. That
+terminates at `pm_ping_add_work` (line 339), which queues onto
+`ping_execute_workq` if `path_check_state` is `INIT`/`FINISH` and
+the `ENFS_PM_PING_TMIE_OUT = 3` second cooldown has elapsed
+(line 367-370).
 
 ### What the probe IS
 
-A `pm_ping_execute_work` (line 309) handler picks up the work item
-and calls:
+`pm_ping_execute_work` (line 309) calls:
 
 ```c
 ret = rpc_clnt_test_xprt(work_info->clnt, work_info->xprt,
@@ -196,13 +188,11 @@ ret = rpc_clnt_test_xprt(work_info->clnt, work_info->xprt,
                          RPC_TASK_ASYNC | RPC_TASK_FIXED);
 ```
 
-`rpc_clnt_test_xprt` (added by patch 0020 — implementation lives in
-our patched `net/sunrpc/clnt.c`) runs an **RPC NULL probe** against
-the targeted xprt. NULL probe = procedure 0 of the bound program;
-empty arg, empty result, "are you there?". The `RPC_TASK_FIXED`
-flag pins the probe to that exact xprt (it would otherwise re-pick
-via the iterator and probe the wrong one); `RPC_TASK_ASYNC` makes
-the call non-blocking.
+`rpc_clnt_test_xprt` (patch 0020, implemented in our patched
+`net/sunrpc/clnt.c`) runs an **RPC NULL probe** — procedure 0 of
+the bound program, empty arg/result, "are you there?".
+`RPC_TASK_FIXED` pins it to the chosen xprt (otherwise the
+iterator would re-pick); `RPC_TASK_ASYNC` makes it non-blocking.
 
 The completion callback is `pm_ping_call_done` (line 274):
 
@@ -242,25 +232,11 @@ the next IO attempt. So after a probe fails:
 
 ### `path_check_state` — the secondary state field
 
-There is a *second* per-xprt state field, `path_check_state`, with
-its own enum (`pm_ping.h:11-17`):
-
-```c
-enum enfs_pm_check_state {
-    PM_CHECK_INIT,      // never queued
-    PM_CHECK_WAITING,   // queued, work not yet running
-    PM_CHECK_CHECKING,  // RPC in flight
-    PM_CHECK_FINISH,    // last probe finished
-    PM_CHECK_UNDEFINE,
-};
-```
-
-This is a workqueue-internal "is a probe currently in flight for
-this xprt?" flag. It exists so `pm_ping_add_work` can dedupe (line
-372): if a probe is already WAITING or CHECKING, don't queue
-another one even if the cadence says we're due. Don't conflate it
-with `path_state`; they live in different fields and have different
-purposes.
+A *second* per-xprt state field exists (`pm_ping.h:11-17`):
+`PM_CHECK_INIT/WAITING/CHECKING/FINISH/UNDEFINE`. Workqueue-internal
+only — `pm_ping_add_work` uses it to dedupe (line 372): if a probe
+is already WAITING or CHECKING, don't queue another. Don't conflate
+with `path_state`; different fields, different purposes.
 
 ## 5.4 `pm_set_path_state` — the only state-machine writer
 

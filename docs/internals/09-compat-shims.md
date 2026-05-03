@@ -211,57 +211,31 @@ optimisation; preserves correctness.
 
 ## 9.9 `shard_route` stubs (six functions)
 
-```c
-static inline int enfs_compat_delete_clnt_shard_cache(struct rpc_clnt *clnt) { ... }
-#define enfs_delete_clnt_shard_cache enfs_compat_delete_clnt_shard_cache
-
-static inline void enfs_compat_shard_set_transport(struct rpc_task *t, struct rpc_clnt *c) { ... }
-#define shard_set_transport enfs_compat_shard_set_transport
-
-static inline int enfs_compat_enfs_shard_init(void) { return 0; }
-#define enfs_shard_init enfs_compat_enfs_shard_init
-
-static inline void enfs_compat_enfs_shard_exit(void) { }
-#define enfs_shard_exit enfs_compat_enfs_shard_exit
-
-static inline void enfs_compat_enfs_query_xprt_shard(struct rpc_clnt *c, struct rpc_xprt *x) { ... }
-#define enfs_query_xprt_shard enfs_compat_enfs_query_xprt_shard
-
-static inline void enfs_compat_enfs_print_uuid(struct enfs_file_uuid *u) { ... }
-#define enfs_print_uuid enfs_compat_enfs_print_uuid
-```
+Six identifier-only `#define`s redirecting `enfs_delete_clnt_shard_cache`,
+`shard_set_transport`, `enfs_shard_init`, `enfs_shard_exit`,
+`enfs_query_xprt_shard`, and `enfs_print_uuid` to no-op
+`enfs_compat_*` inline functions.
 
 OpenEuler's `fs/nfs/enfs/shard_route.c` implements per-file sharding
-across NLM (file-locking) endpoints. The shard-route subsystem
-depends on lockd patches that this DKMS package has not done yet
-(NLM-multipath needs corresponding hooks inside `fs/lockd/`).
-Rather than ship a half-implemented subsystem, `shard_route.o` is
-dropped from the build entirely (see
-[`Kbuild`](../../Kbuild) line 159 onward — `shard_route.o` is
-notably absent from `enfs-y`).
+across NLM (file-locking) endpoints. The subsystem depends on lockd
+patches this DKMS package has not done yet. Rather than ship
+half-implemented, `shard_route.o` is dropped from `enfs-y`
+([`Kbuild`](../../Kbuild) line 159+). Other enfs files still call
+into `shard.h`'s symbols, so without stubs the linker would fail
+with six `undefined reference` errors. The stubs let the link
+succeed; runtime simply lacks NLM multipath and per-file UUID
+display in `/proc/enfs/`.
 
-But other enfs files still call into `shard.h`'s functions
-(`enfs_init.c` initialises the subsystem; `enfs_multipath.c` queries
-shards; `enfs_proc.c` prints uuids). Without stubs, the linker would
-fail with six `undefined reference` errors. The stubs let the link
-succeed; at runtime the shard features are simply absent — no NLM
-multipath, no per-file UUID display in `/proc/enfs/`.
+The `#define X enfs_compat_X` form (identifier only, *not*
+`#define X(args) enfs_compat_X(args)`) is deliberate, noted in the
+compat header itself: `enfs_init.c` takes the address of some of
+these symbols (`&enfs_shard_init`, ...) for a function-pointer init
+table. Function-call-site `#define`s break `&X` and bare `X` in
+non-call contexts; the identifier form preserves both.
 
-The `#define X enfs_compat_X` form (rather than
-`#define X(args) enfs_compat_X(args)`) is a deliberate detail noted
-in the compat header itself: the `enfs_init.c` initialisation table
-takes the address of these symbols (`&enfs_shard_init`, etc.) for a
-function-pointer init-table struct. Function-call-site `#define`s
-break `&X` and bare `X` references in non-call contexts. The
-identifier-only form preserves both call and address-of usage.
-
-**Classification:** graceful-degradation stubs. Locking
-multipath is unavailable; non-locking multipath (the bulk of what
-enfs does) works.
-
-**TODO follow-up:** when lockd patches land, drop the stubs and
-re-enable `shard_route.o` in `enfs-y`. The compat header should grow
-a comment pointing at the lockd patch series number.
+**Classification:** graceful-degradation stubs + TODO. Locking
+multipath unavailable; non-locking multipath works. Drop the stubs
+and re-enable `shard_route.o` once lockd patches land.
 
 ## 9.10 `rpc_xprt_switch_set_singular`: graceful-degradation stub
 
@@ -368,29 +342,23 @@ build — so the failure mode is at least loud.
 
 ## 9.13 What the compat layer does *not* do
 
-Important counterpoints to keep the model honest:
+Counterpoints to keep the model honest:
 
-- **The compat layer does not paper over struct layout differences.**
-  Those go through patches 0005, 0007, 0009, with `__GENKSYMS__`
-  guards. A struct field cannot be added by `#define`.
-- **The compat layer does not export symbols.** Symbol exports go
-  through the patch series (patches 0016–0018). The compat header
-  can declare a symbol that an enfs caller will then link to, but
-  the symbol itself must be made visible by an
-  `EXPORT_SYMBOL_GPL` in patched code.
-- **The compat layer does not provide function bodies for missing
-  exports.** Patch 0020 (re-implementing `rpc_clnt_test_xprt`) is in
-  the patch series, not the compat header, because it needs to live
-  inside `sunrpc.ko` for the symbol export to work. The compat
-  header only declares it.
-- **The compat layer is not a substitute for the patch series.** It
-  cannot insert hooks into `clnt.c` or `xprt.c` (patches 0013 /
-  0014). It can only add things at TU prelude.
+- **No struct layout changes.** Those go through patches 0005, 0007,
+  0009 with `__GENKSYMS__` guards. A struct field cannot be added
+  by `#define`.
+- **No symbol exports.** Exports go through the patch series
+  (0016–0018). The compat header can declare a symbol enfs links
+  to, but `EXPORT_SYMBOL_GPL` must live in patched code.
+- **No function bodies for missing exports.** Patch 0020
+  (re-implementing `rpc_clnt_test_xprt`) lives in the patch series
+  because it must be compiled into `sunrpc.ko`. The compat header
+  only declares it.
+- **No insertions into `clnt.c` or `xprt.c`.** Hooks like patches
+  0013 / 0014 are out of scope.
 
-The dividing line, in one sentence: **patches mutate kernel files;
-the compat header adds C declarations and tiny inline helpers
-visible everywhere.** Stretching either side past that line is a
-sign the design needs rethinking.
+The dividing line: **patches mutate kernel files; the compat header
+adds C declarations and tiny inline helpers visible everywhere.**
 
 ## 9.14 Audit: every shim, every classification
 

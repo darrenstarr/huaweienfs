@@ -92,38 +92,22 @@ critical section. enfs's failover code follows this at every site.
 ## 7.3 RCU on the read side
 
 `rpc_xprt_iter_*` is the RCU-only iterator API. Every public read-side
-helper that walks the iterator either documents that the caller must
-hold `rcu_read_lock()`, or takes it itself for the duration:
+helper either documents that the caller must hold `rcu_read_lock()`
+(see the comment at `vendor/ubuntu-7.0/net/sunrpc/xprtmultipath.c:603`)
+or takes it itself for the duration (`:637`).
 
-```c
-/* vendor/ubuntu-7.0/net/sunrpc/xprtmultipath.c:603 */
-/*
- * Caller must be holding rcu_read_lock().
- */
+enfs follows the same convention. `enfs_multipath.c:393` takes the
+read lock around `rcu_dereference(clnt->cl_xpi.xpi_xpswitch)`, bumps
+`xprt_switch_get` *inside* the read-side critical section, then
+exits RCU. Dereference, bump kref, exit — in that order — is the
+only safe sequence.
 
-/* :637 */
-rcu_read_lock();
-... walk ...
-rcu_read_unlock();
-```
-
-enfs's code follows the same convention. `enfs_multipath.c:393`
-takes the read lock around the `rcu_dereference(clnt->cl_xpi.xpi_xpswitch)`
-that fetches the switch, then bumps `xprt_switch_get` *inside* the
-read-side critical section before letting go of `rcu_read_lock()`.
-That is the only safe ordering: dereference under RCU, bump kref, then
-exit RCU.
-
-Why RCU here and not a spinlock? Two reasons:
-
-1. The read path is on every RPC submission. A spinlock would be a
-   hot contention point, and worse: the reader sometimes holds the
-   pointer across operations that can sleep (e.g. queueing the RPC
-   into a workqueue). Sleeping under a spinlock is a kernel BUG.
-2. Mutation is so rare that the writer's RCU publication overhead
-   (one `smp_wmb` plus one synchronize_rcu in the eventual reclaim
-   path) is invisible at workload scale. A mount edits the switch
-   once; failover edits it on the order of seconds, not microseconds.
+Why RCU and not a spinlock? Two reasons. First, the read path runs
+on every RPC submission, and a spinlock would be both a hot
+contention point and a sleep-prevention hazard (RPC submission can
+queue to a workqueue, and sleeping under a spinlock is a kernel
+BUG). Second, mutation is so rare that the writer's RCU publication
+cost is invisible at workload scale.
 
 ## 7.4 The `__GENKSYMS__` / CRC trick
 
@@ -174,31 +158,24 @@ extended arm is taken and the struct grows the new fields. Memory
 layout has the new slots; the symbol version table claims it's the
 stock struct.
 
-This is fragile in exactly one direction: any `EXPORT_SYMBOL`ed
-function in our patched `sunrpc.ko` whose signature touches one of
-the extended fields by *value* (not by pointer) would compute a
-different CRC under both views, defeating the trick. None of the
-exports we add (chapters 0016–0018, 0020) take or return
-`struct rpc_clnt` by value — they all take pointers. Pointer-to-struct
-arguments are CRC-equivalent under both views because the pointee's
-layout doesn't enter the CRC.
+The trick is fragile in one direction: any exported function in our
+patched `sunrpc.ko` whose signature touches an extended field *by
+value* (not by pointer) would compute a different CRC under the two
+views and defeat the trick. None of patches 0016–0018, 0020 take or
+return `struct rpc_clnt` by value — they all take pointers, which
+are CRC-equivalent regardless of pointee layout.
 
-Net effect: stock `lockd.ko`, `nfs_acl.ko`, `nfsd.ko` (whatever
-ships with the user's kernel package) load against our patched
-`sunrpc.ko` without `disagrees about version of symbol`. They
-continue to operate on the stock-shaped slice of the struct; the
-extended slice is touched only by our own `nfs.ko` and `enfs.ko`,
-both of which were built against the patched headers.
-
-This is *the* load-bearing trick of the whole DKMS approach. Without
-it, "DKMS replacement of sunrpc.ko" would not be a viable shipping
-strategy and the project would have to either (a) rebuild every
-consumer module (which means vendoring `lockd`, `nfs_acl`, `nfsd`)
-or (b) package as a kernel patch rather than DKMS. The former is what
-the Kbuild already does for `lockd.ko` and `nfs_acl.ko` (because they
-have other CRC dependencies on `sunrpc.ko` symbols that the trick does
-*not* protect — see `Kbuild` lines 134-152). The latter is the option
-we did not take.
+Net effect: stock `nfsd.ko` (whatever ships with the user's kernel
+package) loads against our patched `sunrpc.ko` without `disagrees
+about version of symbol`. It continues to see the stock-shaped slice
+of the struct; the extended slice is touched only by our own
+`nfs.ko` and `enfs.ko`. This is *the* load-bearing trick of the DKMS
+approach. Without it the project would have to rebuild every
+consumer module (`lockd`, `nfs_acl`, `nfsd`, ...) or package as a
+kernel patch rather than DKMS. The former is what the Kbuild already
+does for `lockd.ko` and `nfs_acl.ko` (which have *other* CRC
+dependencies on `sunrpc.ko` that the trick does not cover — see
+`Kbuild` lines 134-152); the latter we did not take.
 
 ## 7.5 Workqueues
 
@@ -211,70 +188,42 @@ enfs uses three workqueues, all created with `create_workqueue()`
 | `enfs_lookupcache_workqueue` | `enfs_lookup_cache.c` | refresh the per-server lookup-cache mode after a capability probe completes | `enfs_lookupcache_workqueue_init` (`enfs_lookup_cache.c:453-461`) |
 | `enfs_dns_workqueue` | `dns_process.c` | re-resolve hostnames for `remoteaddrs=` entries that were specified as DNS names; reconcile the live xprt-switch against the new IP set | `enfs_dns_workqueue_init` (`dns_process.c:925-934`) |
 
-Why workqueues for this work and not timers or kthreads?
-
-- **Timers are the wrong primitive** because the work is not a tiny
-  bookkeeping action — a ping involves submitting an RPC and waiting
-  for a callback. Doing that from a softirq-context timer callback
-  would either block the timer (forbidden) or require trampolining
-  back to a sleepable context anyway. Workqueues *are* that
-  sleepable context, with built-in trampolining.
-- **Kthreads would be heavier than necessary.** A kthread is a
-  full kernel thread with its own stack, scheduled directly by the
-  kernel. For periodic, mostly-idle work, that's wasteful — a
-  workqueue worker is shared across many work items. The pm_ping
-  subsystem does have one supporting kthread (`pm_ping_routine` at
-  `pm_ping.c:467`) that loops on a wait condition and submits new
-  work items into the workqueue when the condition fires; the
-  kthread itself does almost no work.
-- **Workqueues let us cancel pending work cleanly** at unmount.
-  `destroy_workqueue` flushes pending items and waits for in-flight
-  ones to complete before returning, which gives us a well-defined
-  shutdown order: stop accepting new work, drain in-flight, free.
+Why workqueues, not timers or kthreads? Timers run in softirq
+context and cannot sleep; a ping submits an RPC and waits for the
+callback, which requires sleepable context. Kthreads are heavier
+than needed for periodic, mostly-idle work — though pm_ping does
+have one supporting kthread (`pm_ping_routine` at `pm_ping.c:467`)
+that loops on a wait condition and submits new work items into the
+workqueue. Workqueues also give a well-defined shutdown order:
+`destroy_workqueue` flushes pending items and waits for in-flight
+ones before returning.
 
 The DNS workqueue is the most interesting of the three because its
-work items live longer than a typical RPC: they kick off a name
-resolution (which can block for seconds in pathological cases), then
-mutate the xprt-switch via the locked helpers from §7.1. The DNS
-worker is the canonical example of "writer side of the
-RCU/spinlock/kref dance" — it reads the switch under RCU to enumerate
-current xprts, takes `xps->xps_lock` to add or remove paths, and
-drops a refcount on each retired xprt via `xprt_switch_put` only
-after all readers have observed the new list (via the implicit
-`synchronize_rcu` inside the RCU-list helpers).
+items live longer than a typical RPC and they mutate the xprt-switch
+via the locked helpers from §7.1. The DNS worker is the canonical
+"writer" example: read the switch under RCU to enumerate current
+xprts, take `xps->xps_lock` to add or remove paths, and drop the
+refcount on retired xprts via `xprt_switch_put` only after readers
+observe the new list (the RCU-list helpers handle the deferral).
 
 ## 7.6 The `cl_enfs` bitfield: why a bit, not a flag word
 
-Patch 0005 adds `cl_enfs : 1` (a single bit) to `struct rpc_clnt`,
-co-located with the existing bits `cl_noretranstimeo`, `cl_autobind`,
-`cl_chatty`, `cl_shutdown`, and `cl_netunreach_fatal`. It is read on
-every RPC submission ([chapter 5](./05-failover.md) covers the call
-sites; the relevant test is `if (clnt->cl_enfs)` at sites like
-`pm_ping.c:436`, `enfs_roundrobin.c:266`).
+Patch 0005 adds `cl_enfs : 1` to `struct rpc_clnt`, co-located with
+existing bits like `cl_shutdown`. It is read on every RPC submission
+(`if (clnt->cl_enfs)` at sites like `pm_ping.c:436`,
+`enfs_roundrobin.c:266`) and set exactly once at
+`enfs_multipath.c:871` before the client is published.
 
-Why a bit and not, say, a `flags` word?
-
-- **Branch cost.** The hot path tests this once per RPC. A bitfield
-  test compiles to a single `test`/`bt`-class instruction against a
-  cache line that is already hot (the rest of `rpc_clnt` was just
-  dereferenced to get to it). A separate `unsigned long flags` word
-  would not be cheaper but would be a separate slot, slightly
-  enlarging the struct.
-- **Allocation.** The bitfield word that already holds
-  `cl_shutdown`, etc., has free bits. Adding `cl_enfs` consumes one
-  of them with zero memory overhead. A new flag word would cost 8
-  bytes (with alignment).
-- **Symbolic atomicity is not needed.** The bit is set exactly once,
-  by `enfs_multipath.c:871`, before the client is published to any
-  reader. After that point it is read-only for the lifetime of the
-  client. There is no read-modify-write race to protect against, so
-  the lack of `set_bit` / `test_bit` atomicity (you can't atomically
-  manipulate a single bit inside a shared bitfield word — you have
-  to RMW the whole word) is a non-issue.
-
-If a future enfs feature ever needs to flip the bit at runtime, that
-calculus would need to be revisited; for now, single-bit, set-once,
-read-many is the right shape.
+Why a bit and not a flag word? Branch cost: a bitfield test compiles
+to a single `test`-class instruction against a cache line already
+hot from the surrounding dereference. Allocation: the existing
+bitfield word has free bits; adding `cl_enfs` costs zero bytes,
+whereas a separate `unsigned long flags` would cost 8 bytes with
+alignment. Atomicity: the bit is set-once before publication, so
+the lack of single-bit RMW atomicity inside a shared bitfield word
+doesn't matter. If a future feature ever needs to flip it at
+runtime, that calculus would need revisiting; for now,
+single-bit-set-once is the right shape.
 
 ## 7.7 "Locked" vs. "lockless" helpers
 
@@ -309,30 +258,27 @@ window closed.
 
 ## 7.8 RPC task scheduling and `tk_xprt`
 
-A subtle concurrency point that comes up in failover: an RPC task
-holds a pointer to its current transport in `task->tk_xprt`. During
-normal operation this is set once (at `rpc_task_set_transport`) and
-read on every step of the task's lifecycle. During failover, enfs
-*rewrites* it mid-task — `failover_path.c:37` does
+A subtle concurrency point in failover: an RPC task holds its
+current transport in `task->tk_xprt`. Normally set once at
+`rpc_task_set_transport`; during failover, enfs *rewrites* it
+mid-task (`failover_path.c:37`):
 `task->tk_xprt = rpc_task_get_next_xprt(task->tk_client)`.
 
-Why is this safe without an explicit lock around `tk_xprt`? Because
-the rule for an RPC task is that, at any instant, it is on exactly
-one of: (a) a wait queue inside SunRPC, (b) the run queue of an
-`rpciod` workqueue worker, or (c) executing inside one of its own
-ops callbacks (which themselves run on rpciod). The transitions
-between these states are serialised by SunRPC's internal task
-locking. enfs's failover code only mutates `tk_xprt` in case (a),
-when the task is parked on a wait queue and not actively running on
-any CPU. The wakeup that unparks the task happens *after* the
-mutation, so the task sees the new `tk_xprt` from its first read.
+Why is this safe without explicit locking around `tk_xprt`? Because
+an RPC task is, at any instant, on exactly one of: a wait queue
+inside SunRPC, the run queue of an `rpciod` worker, or executing
+inside one of its own ops callbacks (which themselves run on
+rpciod). Transitions between those states are serialised by SunRPC's
+internal task locking. enfs's failover only mutates `tk_xprt` while
+the task is parked on a wait queue. The wakeup that unparks the
+task happens *after* the mutation, so the task sees the new value
+from its first read.
 
 There is no comment in `vendor/ubuntu-7.0/net/sunrpc/clnt.c` that
-states this rule explicitly — it is implicit in the task-state
-model that `rpc_execute` walks. If you are extending failover, the
-practical guideline is: only touch `tk_xprt` from a context where
-you have just dequeued the task and have not yet re-queued it. Any
-other context is racy.
+states this rule explicitly — it's implicit in the task-state model
+`rpc_execute` walks. Practical guideline for anyone extending
+failover: touch `tk_xprt` only from a context where you've just
+dequeued the task and have not yet re-queued it.
 
 ## 7.9 Summary
 

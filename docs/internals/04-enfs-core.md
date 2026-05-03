@@ -86,49 +86,32 @@ The four sub-inits in `init_entry[]` (line 84-89) are:
 A few things follow from this order:
 
 - **`enfs_config_load()` runs first** because every later init reads
-  `enfs_get_config_*()` — `pm_ping` needs `path_detect_interval`,
-  `enfs_multipath` needs `link_count_per_mount`, etc. If config
-  loading is silent-skipped (e.g. `/etc/enfs/config.ini` is absent),
+  `enfs_get_config_*()`. With no `/etc/enfs/config.ini` installed,
   the static defaults from `enfs_config.c:40-51`
-  (`DEFAULT_PATH_DETECT_INTERVAL = 10`, etc.) take effect. Useful
-  intuition: an `enfs.ko` with no config file installed still works,
-  just with the OE-shipped defaults.
-
-- **`enfs_adapter_register()` runs second** but happens *before* any
-  of the sub-init helpers. The vtable being registered points at
-  functions some of which don't have their backing globals
-  initialized yet (`enfs_remount` needs the multipath link-count
-  spinlocks initialized in `enfs_multipath_init`). This is safe in
-  practice because nothing on the nfs.ko side calls into the vtable
-  until the *next* mount, which happens long after step 4. But it's a
-  subtle correctness assumption — there is no rendezvous making the
-  init-helpers visible before the vtable.
-
-- **`rpc_multipath_ops_register(&ops)`** (called from
-  `enfs_multipath_init` at `enfs_multipath.c:1083`) is what tells
-  `sunrpc.ko` "from now on, route per-task hooks through this vtable".
-  Until step 1 completes, sunrpc.ko's
-  `rpc_multipath_ops_get()` returns NULL and every per-task hook is a
-  no-op — i.e. you have a stock NFS client. The transition is
-  atomic because `multipath_ops` is RCU-published via `cmpxchg`
+  (`DEFAULT_PATH_DETECT_INTERVAL = 10`, etc.) take effect — enfs.ko
+  is fully functional out of the box.
+- **`enfs_adapter_register()` runs before any sub-init.** Its
+  vtable points at functions some of which need globals initialised
+  in step 3 (e.g. `enfs_remount` needs the spinlocks from
+  `enfs_multipath_init`). Safe in practice because nothing on the
+  nfs.ko side calls in until the next mount, but a subtle correctness
+  assumption with no rendezvous.
+- **`rpc_multipath_ops_register(&ops)`** at
+  `enfs_multipath.c:1083` is what tells sunrpc.ko to route per-task
+  hooks through us. Until that runs, `rpc_multipath_ops_get()` returns
+  NULL and every hook is a no-op (i.e. stock NFS behaviour). The
+  transition is atomic — RCU-published via cmpxchg
   (`sunrpc_enfs_adapter.c:23-31`).
 
 ### What if `nfs.ko` isn't loaded?
 
-`enfs.ko` has a module-symbol dependency on
-`enfs_adapter_register` (lives in `nfs.ko/enfs_adapter.c`) and on
-`rpc_multipath_ops_register` (lives in `sunrpc.ko/sunrpc_enfs_adapter.c`).
-`modprobe enfs` therefore loads `sunrpc.ko` and `nfs.ko` first — they
-are listed in the modules.dep entry that `depmod` writes for
-`updates/fs/nfs/enfs/enfs.ko`. If you bypass `modprobe` and `insmod
-enfs.ko` directly, the `insmod` fails with `Unknown symbol` because
-the EXPORT_SYMBOL_GPLs aren't resolved.
-
-The reverse — `modprobe nfs` without `enfs.ko` — works fine. The
-`ENFS adapter` sits in nfs.ko but its registry pointer is NULL until
-`enfs.ko` registers, and every callsite is guarded
-(`if (ops == NULL)` … fall through to stock behavior). This is the
-"degrade gracefully to stock NFS client" property.
+`enfs.ko` has a module-symbol dependency on `enfs_adapter_register`
+(in nfs.ko) and `rpc_multipath_ops_register` (in sunrpc.ko), so
+`modprobe enfs` autoloads both first. `insmod` directly fails with
+`Unknown symbol`. The reverse — `modprobe nfs` without enfs.ko —
+works fine: the registry pointer is NULL and every nfs.ko callsite
+guards with `if (ops == NULL) ...` and falls through to stock
+behaviour.
 
 ## 4.3 The two adapter vtables
 
@@ -275,35 +258,26 @@ void enfs_create_multi_xprt(struct rpc_create_args *args, struct rpc_clnt *clnt)
 A few things to flag:
 
 - **NFSv4 short-circuit at line 925.** This build does multipath for
-  NFSv3 only. NFSv4 has its own multi-server story (FedFS / pNFS /
-  trunking) and the OE code path for v4 is incomplete in our subset.
-  Chapter 8 covers what was deferred and why.
-
+  NFSv3 only; chapter 8 covers what was deferred and why.
 - **Global caps.** `enfs_mount_count_add` (line 127) and
   `enfs_link_count_add` (line 69) refuse to push past
   `ENFS_MAX_MOUNT_COUNT = 256` (`enfs.h:33`) and the configurable
-  `link_count_total` (default 512, max 16384 — `enfs.h:29-31`). This
-  is to prevent a runaway script from exhausting kernel sockets.
-
+  `link_count_total` (default 512, max 16384 — `enfs.h:29-31`).
 - **`alloc_main_xprt_multicontext`** (line 899) doesn't *create* a
-  transport; the original xprt from `rpc_create` already exists. It
-  just wires an `enfs_xprt_context` reservation slot onto it (via
-  `xprt_set_reserve_context`), marks `ctx->main = true`, and pushes
-  it to `PM_STATE_NORMAL` — the only xprt that starts in NORMAL
-  rather than INIT. The "main" xprt is the one whose source/dest
-  pair came from the mount syntax itself (`server:/export`); the
-  multipath xprts come from the `remoteaddrs=` list.
+  transport — the original xprt from `rpc_create` already exists.
+  It wires an `enfs_xprt_context` reservation slot onto it via
+  `xprt_set_reserve_context`, marks `ctx->main = true`, and pushes
+  it to `PM_STATE_NORMAL` (the only xprt that starts in NORMAL
+  rather than INIT). The "main" xprt is the original
+  `server:/export` address; multipath xprts come from `remoteaddrs=`.
+- **Despite the name, `enfs_multipath_create_thread`** (line 823)
+  runs synchronously on the caller's stack — OE-vestigial naming.
+  The mount syscall blocks until all transports are constructed
+  and probed.
 
-- **Despite the function name, it is not actually threaded.**
-  `enfs_multipath_create_thread()` (line 823) runs synchronously on
-  the caller's stack. The name is OE-vestigial — an earlier OE
-  version did off-load this to a workqueue; the current code calls
-  inline. This matters because the mount syscall blocks until *all*
-  transports are constructed and probed.
-
-The real heavy lifting happens in `enfs_xprt_ippair_create`
-(line 638) → `enfs_combine_addr` (line 493) → `enfs_combine_addr_with_no_local`
-(line 575). The choice of which combiner is at line 647-654:
+The heavy lifting is in `enfs_xprt_ippair_create` (line 638) →
+`enfs_combine_addr` (line 493) or `enfs_combine_addr_with_no_local`
+(line 575). The choice (line 647-654):
 
 ```c
 if (xprtargs->ident == XPRT_TRANSPORT_RDMA ||
@@ -314,23 +288,16 @@ else
 ```
 
 `enfs_combine_addr` walks the cartesian product of (local × remote)
-in an order chosen to maximise spread when M and N share a common
-factor. The relevant arithmetic (line 528-536):
-
-```c
-local_remote_total_lcm = total_combinations / enfs_cal_gcd(local_total, remote_total);
-for (i = 0; i < total_combinations; i++) {
-    local_index  = i % local_total;
-    remote_index = (i + link_count / local_remote_total_lcm) % remote_total;
-    ...
-}
-```
+in an order picked to maximise spread when M and N share a common
+factor (line 528-536; LCM offsets the remote index per cycle so a
+2×4 layout actually rotates rather than pairing local[0] with the
+same remote each round).
 
 For each pair it calls `enfs_configure_xprt_to_clnt` (line 315) which
 copies the addresses into the `xprt_create` template and invokes
 `rpc_clnt_add_xprt(clnt, xprtargs, enfs_add_xprt_setup, attach_info)`
-(line 332). `enfs_add_xprt_setup` (line 283) is the per-xprt callback
-invoked by the SunRPC layer once the xprt is constructed:
+(line 332). `enfs_add_xprt_setup` (line 283) runs once SunRPC has
+built the xprt:
 
 ```c
 ctx = xprt_get_reserve_context(xprt);
@@ -347,25 +314,22 @@ ret = pm_ping_rpc_test_xprt_with_callback(clnt, xprt, pm_xprt_ping_callback, att
 return 1;   // tell rpc_clnt_add_xprt: we'll attach to xps ourselves later
 ```
 
-The `return 1` is important — it's how `enfs_add_xprt_setup` tells
-`rpc_clnt_add_xprt` *not* to do the default `xprt_switch_add_xprt`.
-We want to add to the switch only after the probe succeeds and we've
-seen what state the path comes up in. The actual switch attach is
-deferred to `enfs_add_xprts_to_clnt` (line 440), which runs after a
+The `return 1` tells `rpc_clnt_add_xprt` *not* to do the default
+`xprt_switch_add_xprt` — we want to attach only after probing and
+seeing what state the path comes up in. Switch attach is deferred to
+`enfs_add_xprts_to_clnt` (line 440) which runs after
 `wait_event(...wait_queue_condition == 0)` at line 566 — i.e. after
-all per-xprt ping callbacks have decremented the wait count to zero.
+all per-xprt ping callbacks have completed.
 
-This synchronous probe-then-attach pattern is why a 4-IP mount with
-one dead address waits the full path-detect timeout (default 5
-seconds, `path_detect_timeout`) before `mount` returns. The dead
-address goes into the switch in `PM_STATE_FAULT` rather than not
-being added at all — see line 475-486 where any xprt in a connected
-state, *or* any xprt at all if `create_path_no_route` is set, is
-attached. The round-robin dispatcher will then skip it until pm_ping
-finds it alive (chapter 5).
+This synchronous probe-then-attach pattern means a 4-IP mount with
+one dead address waits the full `path_detect_timeout` (default 5 s)
+before `mount` returns. The dead address still goes into the switch
+in `PM_STATE_FAULT` (line 475-486 — any connected state, or any xprt
+at all if `create_path_no_route` is set, gets attached). The
+dispatcher then skips it until pm_ping promotes it (chapter 5).
 
-Right before the function returns to its caller, line 871 sets the
-load-bearing flag:
+Right before the function returns, line 871 sets the load-bearing
+flag:
 
 ```c
 create_args->clnt->cl_enfs = 1;
