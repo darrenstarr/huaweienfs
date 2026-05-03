@@ -45,6 +45,9 @@ override_dh_auto_build:
 	scripts/fetch-vendor-ubuntu.sh ubuntu-6.8
 	scripts/fetch-vendor-ubuntu.sh ubuntu-6.14
 	scripts/fetch-vendor-ubuntu.sh ubuntu-7.0
+	# Generate enfs(7) man page from markdown source via pandoc;
+	# debian/enfs-dkms.manpages declares it for dh_installman.
+	$(MAKE) manpage
 
 override_dh_auto_install:
 	mkdir -p $(DKMS_SRC)
