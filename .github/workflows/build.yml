@@ -197,7 +197,7 @@ jobs:
 
       - name: Install dpkg-dev + dh-dkms and build .deb on arm64
         run: |
-          sudo apt-get install -y dpkg-dev debhelper dh-dkms dkms lintian
+          sudo apt-get install -y dpkg-dev debhelper dh-dkms dkms lintian pandoc
           dpkg-buildpackage -us -uc -b
           ls -lh ../enfs-dkms_*.deb
 
@@ -221,7 +221,7 @@ jobs:
       - name: Install dpkg-dev + lintian + dh-dkms + devscripts
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential dpkg-dev debhelper dh-dkms dkms lintian devscripts
+          sudo apt-get install -y build-essential dpkg-dev debhelper dh-dkms dkms lintian devscripts pandoc
 
       - name: Cache fetched Ubuntu kernel source (one cache covers all 3 targets)
         uses: actions/cache@v4
