@@ -1,3 +1,13 @@
+enfs-dkms (0.1.6-1) noble; urgency=medium
+
+  * Ships /usr/share/man/man7/enfs.7.gz — `man 7 enfs` after install
+    documents mount options, /sys + /proc interfaces, NFSDBG_ENFS
+    debug bit, examples, and caveats.
+  * No code changes vs 0.1.5; the .deb behaviour and module set are
+    identical.
+
+ -- Darren <darren@example.invalid>  Sat, 03 May 2026 14:30:00 +0200
+
 enfs-dkms (0.1.5-1) noble; urgency=medium
 
   * Architecture: all — DKMS source-only package, one .deb works on
