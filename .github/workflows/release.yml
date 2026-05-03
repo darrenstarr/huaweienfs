@@ -43,13 +43,21 @@ jobs:
           body: |
             ## Supported targets
 
-            This release builds and loads end-to-end on:
+            | Ubuntu            | Kernel series | amd64                                       | arm64                                       |
+            |-------------------|---------------|---------------------------------------------|---------------------------------------------|
+            | **26.04 LTS**     | 7.0.x         | ✓ full E2E (build + apt install + mount)    | ✓ build + DKMS install on real arm64 in CI  |
+            | **24.04 LTS HWE** | 6.14.x        | ✓ full E2E (build + apt install + mount)    | ✓ build + DKMS install on real arm64 in CI  |
+            | **24.04 LTS GA**  | 6.8.x         | ✓ build + apt install + module load          | ✓ build + DKMS install on real arm64 in CI  |
 
-            | Ubuntu            | Kernel series | amd64 | arm64 |
-            |-------------------|---------------|-------|-------|
-            | **26.04 LTS**     | 7.0.x         | ✓ GA  | ✓ CI-built (untested on hardware) |
-            | **24.04 LTS HWE** | 6.14.x        | ✓     | ✓ CI-built (untested on hardware) |
-            | **24.04 LTS GA**  | 6.8.x         | ✓     | ✓ CI-built (untested on hardware) |
+            **arm64 status, more precisely:** every PR runs
+            `apt install ./enfs-dkms_*_all.deb` on a real arm64
+            GitHub Actions runner (Ampere Altra) and confirms
+            `dkms status -m enfs` shows the modules as `installed`.
+            `modprobe enfs` and a real multipath mount on arm64
+            hardware are not part of CI (hosted runners are sandboxed
+            VMs that won't load foreign-built modules) — that
+            verification happens out-of-band on a dedicated arm64
+            test VM.
 
             The .deb is `Architecture: all` — DKMS does the per-kernel,
             per-arch compile on the user's machine using their installed
