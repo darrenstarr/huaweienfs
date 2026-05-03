@@ -71,8 +71,12 @@ help:
 	@echo "  ubuntu-6.11  Ubuntu 24.04.1 HWE kernel"
 	@echo "  ubuntu-6.8   Ubuntu 24.04 LTS GA kernel"
 
+.PHONY: fetch-vendor
+fetch-vendor:
+	@scripts/fetch-vendor-ubuntu.sh "$(TARGET)"
+
 .PHONY: port
-port:
+port: fetch-vendor
 	@scripts/build-src-tree.sh \
 	    "$(UBUNTU_VENDOR_DIR)" \
 	    "$(OE_VENDOR_DIR)" \

@@ -1,1 +1,11 @@
-linux_6.14.0-37.37~24.04.1
+# Pin for `scripts/fetch-vendor-ubuntu.sh ubuntu-6.14`.
+# The fetch script sources this file as shell, downloads the named
+# Ubuntu kernel source package from ARCHIVE_URL, dpkg-source -x's it,
+# and copies the paths in MANIFEST into this directory.
+#
+# Source: Ubuntu 24.04 LTS HWE (6.14) kernel.
+
+SRC_PKG=linux-hwe-6.14
+SRC_VERSION=6.14.0-37.37~24.04.1
+ARCHIVE_URL=http://archive.ubuntu.com/ubuntu/pool/main/l/linux-hwe-6.14
+VENDORED=2026-05-02
