@@ -41,7 +41,7 @@ The OpenEuler design chose, instead, to split the work three ways and
 have the multipath module *register* itself with the patched
 modules at load time. This package follows that split exactly:
 
-```
+```text
 +-----------------------------------------------------------+
 |  enfs.ko    (vendor/openeuler/fs/nfs/enfs/, ~22 files)    |
 |             multipath manager, round-robin policy,        |
@@ -341,7 +341,7 @@ next section.
 A reader landing on the repo for the first time benefits from a tour
 of how the input files flow into the build:
 
-```
+```text
 vendor/openeuler/                  upstream OpenEuler OLK-6.6 (verbatim)
   fs/nfs/enfs/                     ── source of enfs.ko (additive, no
                                       conflict; copied through to src/)

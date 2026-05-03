@@ -565,6 +565,7 @@ the late reply or definitively fail.
 ## 5.10 Worked example: 4 xprts, one NIC pulled
 
 Setup:
+
 - Mount: `mount -t nfs -o enfs_info='remoteaddrs=10.0.0.10~10.0.0.11~10.0.0.12~10.0.0.13' \
   10.0.0.10:/export /mnt`
 - Default config (10 s probe interval, 5 s probe timeout, 0 s

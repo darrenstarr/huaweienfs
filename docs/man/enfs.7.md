@@ -109,8 +109,7 @@ when **cl_enfs == 1** clients are created.
 ## /proc/sys/sunrpc/nfs_debug
 
 Bitmask for NFS debug output. enfs adds a new bit:
-
-**NFSDBG_ENFS = 0x10000**
+`NFSDBG_ENFS = 0x10000`.
 
 ```sh
 echo 0x10000 | sudo tee /proc/sys/sunrpc/nfs_debug
@@ -160,7 +159,7 @@ dd if=/mnt/multi/largefile of=/dev/null bs=1M count=1024 status=progress
 In another, drop one server NIC (e.g., shut down its switchport).
 After the **pm_ping** interval (5s default), **dmesg** should show:
 
-```
+```text
 enfs:[pm_set_path_state] The xprt localip{*} remoteip{10.0.0.11} \
   path state change from {1} to {0}.
 ```
@@ -213,7 +212,7 @@ _/etc/enfs/config.ini_
   any NFS server; only enfs's extension queries are server-specific.
 * **NFS-over-RDMA**, **pNFS** and **NFSv4 referrals** are not in
   scope of this port.
-* Modifications to **sunrpc.ko** are gated by the **__GENKSYMS__**
+* Modifications to **sunrpc.ko** are gated by the ****GENKSYMS****
   trick so that stock **lockd** / **nfs_acl** / **nfsd** continue to
   load against our patched **sunrpc.ko** without symbol-version
   errors. If you replace **enfs-dkms** with a custom build that

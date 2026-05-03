@@ -10,7 +10,7 @@ at `enfs_xprt_iter_roundrobin`, and that the transport list under
 explains how all of that came to be — what happens between the user
 typing
 
-```
+```text
 mount -t nfs -o vers=3,remoteaddrs=192.0.2.10~192.0.2.11~192.0.2.12 \
     server.example.com:/export /mnt
 ```
@@ -184,7 +184,7 @@ It surprises new readers that `enfs_info=` is a documented syntax
 yet has no parser action. The history is: in OpenEuler, the
 original mount syntax was
 
-```
+```text
 mount -t nfs -o enfs_info='remoteaddrs=A,localaddrs=B' ...
 ```
 
@@ -392,7 +392,7 @@ user did supply `remoteaddrs=`, this is a no-op.
 
 Imagine the user runs:
 
-```
+```text
 mount -t nfs -o vers=3,nconnect=1,\
 remoteaddrs=192.0.2.10~192.0.2.11~192.0.2.12 \
   server.example.com:/export /mnt
@@ -612,7 +612,7 @@ basic round-robin without the OpenEuler-specific server hints. The
 test plan in
 [`docs/PORTING-NOTES.md`](../PORTING-NOTES.md) flags this as a
 runtime risk for non-OpenEuler servers; in practice the round-robin
-+ pm_ping logic still works fine without EXTEND.
+plus pm_ping logic still works fine without EXTEND.
 
 The full EXTEND wire format and decoder live in chapter 6.
 
@@ -625,7 +625,7 @@ The patch 0019 commit message mentions checking
 from it directly. After the mount above, on a system with three
 working remote IPs:
 
-```
+```text
 $ ls /sys/kernel/sunrpc/xprt-switches/
 switch-0  switch-1
 $ cat /sys/kernel/sunrpc/xprt-switches/switch-1/xprt_switch_info

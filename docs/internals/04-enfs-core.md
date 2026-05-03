@@ -18,7 +18,7 @@
 The Kbuild object list (`Kbuild` lines 158-178) tells us exactly what
 the module contains. Eighteen translation units, one module:
 
-```
+```text
 fs/nfs/enfs/enfs_init.o            module_init / module_exit, vtable registration
 fs/nfs/enfs/enfs_config.o          /etc/enfs/config.ini parser, config getters
 fs/nfs/enfs/mgmt_init.o            two-line wrapper: kicks the config-reload timer
@@ -492,7 +492,7 @@ client name is `<peer-ip>_<cl_clid>` — see `clnt_proc_name`
 
 Tab-separated columns (`enfs_proc.c:320-323`):
 
-```
+```text
 id   local_addr   remote_addr   r_count  r_rtt  r_exec  w_count  w_rtt  w_exec  queuelen
 ```
 
@@ -508,7 +508,7 @@ to `stat` zeros all per-xprt counters** (`enfs_proc_write`, line
 
 Tab-separated columns (`enfs_proc.c:295-298`):
 
-```
+```text
 id   local_addr   remote_addr   path_state   xprt_state
 ```
 

@@ -464,7 +464,7 @@ sudo tcpdump -nn -i any -c 2000 'tcp and src port 2049' \
 
 Expected for the four-IP example:
 
-```
+```text
    503 10.0.10.11
    500 10.0.10.12
    498 10.0.20.11
