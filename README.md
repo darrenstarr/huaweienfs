@@ -202,9 +202,14 @@ Makefile                  `make help` lists targets
   - [04-operations.md](docs/user/04-operations.md) — `/proc/enfs/`, sysfs, live remount, DNS rebind, `tcpdump`
   - [05-troubleshooting.md](docs/user/05-troubleshooting.md) — symptom → cause → fix runbook
   - [06-uninstall.md](docs/user/06-uninstall.md) — clean rollback to stock NFS
+  - [07-huawei-storage.md](docs/user/07-huawei-storage.md) — using enfs against Huawei Dorado / OceanStor arrays (the original use case)
+- **Manual page** — `man 7 enfs` after install, or
+  [`docs/man/enfs.7.md`](docs/man/enfs.7.md) on disk
 - **Architecture** — `docs/ARCHITECTURE.md` (component map, hook sites)
 - **Porting status** — `docs/PORTING-NOTES.md` (API drift table, work list)
 - **DKMS internals** — `docs/DKMS-NOTES.md` (why three modules, install layout)
+- **Code deep-dive** — `docs/internals/` — 10-chapter walk through what each
+  patched/added kernel file does and why
 - **AI agent guidance** — `docs/ai-agent-guide.md` (rules for Claude/etc.)
 
 ### Development environment placeholders

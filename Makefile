@@ -88,8 +88,15 @@ port: fetch-vendor
 modules: port
 	$(MAKE) -C $(KDIR) M=$(SRC_DIR) modules
 
+.PHONY: manpage
+manpage: docs/man/enfs.7
+
+docs/man/enfs.7: docs/man/enfs.7.md
+	pandoc -s -t man $< -o $@
+
 .PHONY: clean
 clean:
+	-rm -f docs/man/enfs.7
 	-$(MAKE) -C $(KDIR) M=$(SRC_DIR) clean 2>/dev/null
 	rm -rf $(SRC_DIR)/.build-stamp
 	find $(SRC_DIR) -name '*.o' -o -name '*.ko' -o -name '.*.cmd' -o -name '*.mod*' 2>/dev/null | xargs -r rm -f
