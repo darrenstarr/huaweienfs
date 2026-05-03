@@ -112,19 +112,18 @@ jobs:
             ls -lh "$ko"
           done
 
-  # aarch64 build using a real arm64 environment via QEMU + binfmt.
-  # Cross-compiling on amd64 with the linux-headers-...:arm64 package
-  # is a maze (the package ships arm64 host tools, the kernel build
-  # tries to recurse into scripts/selinux which needs files not in
-  # linux-headers-*, etc.). Running everything in an arm64 container
-  # under emulation is slower (~10-15 min vs amd64's 2 min) but
-  # uses the standard, well-trodden in-arch build flow.
+  # aarch64 native build on GitHub-hosted Ampere Altra runners
+  # (ubuntu-24.04-arm). Same install + make flow as the amd64 jobs;
+  # finishes in ~2 min instead of the 20-50 min the previous
+  # QEMU+binfmt container needed.
   #
-  # This proves the source compiles for arm64. On-target *load*
-  # testing is separate, on the QEMU VM enfs-dev-24-arm64.
-  build-arm64-emu:
+  # This proves the source compiles natively for arm64. On-target
+  # *load* testing under a real running arm64 kernel is separate
+  # (the runner is a sandboxed VM that doesn't let us modprobe
+  # foreign-built modules); we run that on enfs-dev-24-arm64.
+  build-arm64-native:
     name: build (${{ matrix.target }} arm64)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
       matrix:
@@ -138,40 +137,58 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up QEMU binfmt for arm64
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Build modules in an arm64 container
+      - name: Install build deps + matching kernel headers
         run: |
-          docker run --rm --platform linux/arm64 \
-            -v "$PWD":/work -w /work \
-            ubuntu:24.04 \
-            bash -c '
-              set -e
-              apt-get update
-              apt-get install -y build-essential bc kmod cpio flex bison \
-                  libssl-dev libelf-dev zstd dwarves make file \
-                  ${{ matrix.headers }}
-              KVER=$(ls /lib/modules/ | grep "^${{ matrix.kver-prefix }}" | head -1)
-              if [ -z "$KVER" ]; then
-                echo "::error::No arm64 headers match ${{ matrix.kver-prefix }}.*"
-                ls /lib/modules/
-                exit 1
-              fi
-              echo "Using KVER=$KVER (arm64)"
-              make port TARGET=${{ matrix.target }}
-              make modules TARGET=${{ matrix.target }} KVER=$KVER
-              for ko in src/sunrpc.ko src/nfs.ko src/fs/nfs/nfsv3.ko \
-                        src/fs/lockd/lockd.ko src/fs/nfs_common/nfs_acl.ko \
-                        src/fs/nfs/enfs/enfs.ko; do
-                [ -f "$ko" ] || { echo "::error::missing $ko"; exit 1; }
-                file "$ko" | grep -q "ELF 64-bit LSB.*aarch64" \
-                    || { echo "::error::$ko is not aarch64"; file "$ko"; exit 1; }
-                ls -lh "$ko"
-              done
-            '
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc kmod cpio flex bison \
+              libssl-dev libelf-dev zstd dwarves file
+          sudo apt-get install -y ${{ matrix.headers }}
+
+      - name: Pick a real KVER from installed headers
+        id: kver
+        run: |
+          KVER=$(ls /lib/modules/ | grep "^${{ matrix.kver-prefix }}" | head -1)
+          if [ -z "$KVER" ]; then
+            echo "::error::No installed headers match ${{ matrix.kver-prefix }}.*"
+            ls /lib/modules/
+            exit 1
+          fi
+          echo "kver=$KVER" >> "$GITHUB_OUTPUT"
+          echo "Using KVER=$KVER (arm64)"
+
+      - name: Port source tree
+        run: make port TARGET=${{ matrix.target }}
+
+      - name: Build modules
+        run: make modules TARGET=${{ matrix.target }} KVER=${{ steps.kver.outputs.kver }}
+
+      - name: Confirm all six modules linked + are aarch64
+        run: |
+          set -e
+          for ko in src/sunrpc.ko src/nfs.ko src/fs/nfs/nfsv3.ko \
+                    src/fs/lockd/lockd.ko src/fs/nfs_common/nfs_acl.ko \
+                    src/fs/nfs/enfs/enfs.ko; do
+            [ -f "$ko" ] || { echo "::error::missing $ko"; exit 1; }
+            file "$ko" | grep -q "ELF 64-bit LSB.*aarch64" \
+                || { echo "::error::$ko is not aarch64"; file "$ko"; exit 1; }
+            ls -lh "$ko"
+          done
+
+      - name: Install dpkg-dev + dh-dkms and build .deb on arm64
+        run: |
+          sudo apt-get install -y dpkg-dev debhelper dh-dkms dkms lintian
+          dpkg-buildpackage -us -uc -b
+          ls -lh ../enfs-dkms_*.deb
+
+      - name: dpkg install of the .deb (validates postinst on arm64)
+        run: |
+          # The .deb is Architecture: all so the same artefact already
+          # built by the build-deb job covers arm64; running the install
+          # here proves dh_dkms substitution + dkms add + dkms install
+          # actually work on a real arm64 kernel with arm64 headers.
+          sudo apt-get install -y ../enfs-dkms_*_all.deb
+          sudo dkms status -m enfs
+          ls /lib/modules/$(uname -r)/updates/dkms/ | sort
 
   # The .deb itself doesn't need a kernel build — it's the DKMS source
   # tarball + control files. dpkg-buildpackage runs lintian afterwards.
