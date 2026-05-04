@@ -65,7 +65,7 @@ front-end NFS addresses, separated by **`~`** (tilde, not comma). Replace
 > looking at the mount table can tell at a glance that this mount uses
 > the multipath stack. `mount -t nfs -o remoteaddrs=...` also works (for
 > back-compat) but is harder to spot. See issue #20 for context.
-
+>
 > **Why `vers=3,nolock`?** v0 of this package supports NFSv3 and disables
 > NLM file locking. v1 will lift both restrictions. If you need NFSv4 or
 > file locking *today*, see [05-troubleshooting.md](05-troubleshooting.md).
