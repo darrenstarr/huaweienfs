@@ -70,11 +70,13 @@ See vendor/ubuntu-6.8/UPSTREAM-REVISION for the new format."
     die "$PIN_FILE missing LINUX_SOURCE_PKG="
 fi
 
-# Resolve the source tree. Two paths:
-#   (a) ENFS_LINUX_SOURCE_TREE points to an already-extracted dir
-#       (HWE / custom setup). Use it directly; no extraction.
-#   (b) /usr/src/${LINUX_SOURCE_PKG}.tar.* (linux-source-X.Y.Z apt
-#       package). Extract to cache.
+# Resolve the source tree. Three paths in priority order:
+#   (a) $ENFS_LINUX_SOURCE_TREE              explicit override
+#   (b) /usr/src/<pkg>.tar.{bz2,xz,gz}        binary-deb layout (GA)
+#   (c) /usr/src/<pkg>/                       pre-extracted dir layout
+#                                             (HWE: install-verify or
+#                                             user pre-stages apt source
+#                                             output here)
 SRC_TREE=
 TARBALL=
 
@@ -82,9 +84,6 @@ if [ -n "${ENFS_LINUX_SOURCE_TREE:-}" ]; then
     SRC_TREE="$ENFS_LINUX_SOURCE_TREE"
     [ -d "$SRC_TREE" ] || die "ENFS_LINUX_SOURCE_TREE=$SRC_TREE is not a directory"
     log "using pre-extracted tree at $SRC_TREE (override)"
-    # Cache key derives from the override path so swapping trees
-    # invalidates appropriately. Hash the absolute path; trees with
-    # the same path are assumed identical.
     SRC_KEY=$(printf '%s' "$SRC_TREE" | sha256sum | cut -c1-16)
     WANT_STAMP="override_${SRC_KEY}"
 else
@@ -96,21 +95,30 @@ else
         fi
     done
 
-    if [ -z "$TARBALL" ]; then
-        die "missing /usr/src/${LINUX_SOURCE_PKG}.tar.{bz2,xz,gz}
-       Install with:  sudo apt install ${LINUX_SOURCE_PKG}
-       (the package ships the tarball under /usr/src/; nothing else needed.)
-       OR set ENFS_LINUX_SOURCE_TREE=/path/to/extracted/linux-X.Y.Z to
-       point at an already-extracted source tree (HWE workflow — see
-       docs/internals/10-testing-and-ci.md §10.4)."
+    if [ -n "$TARBALL" ]; then
+        log "using $TARBALL"
+        TARBALL_SHA=$(sha256sum "$TARBALL" | cut -c1-16)
+        CACHE="$CACHE_ROOT/${LINUX_SOURCE_PKG}_${TARBALL_SHA}"
+        WANT_STAMP="${LINUX_SOURCE_PKG}_${TARBALL_SHA}"
+    elif [ -d "/usr/src/${LINUX_SOURCE_PKG}" ]; then
+        # No tarball, but an extracted tree at the conventional path
+        # (HWE workflow: `apt source linux-hwe-X.Y` then move/symlink
+        # the extracted dir into /usr/src/<LINUX_SOURCE_PKG>/).
+        SRC_TREE="/usr/src/${LINUX_SOURCE_PKG}"
+        log "using extracted tree $SRC_TREE (no tarball, dir-only layout)"
+        SRC_KEY=$(printf '%s' "$SRC_TREE" | sha256sum | cut -c1-16)
+        WANT_STAMP="extracted_${SRC_KEY}"
+    else
+        die "missing kernel source for ${LINUX_SOURCE_PKG}. Tried:
+       1. /usr/src/${LINUX_SOURCE_PKG}.tar.{bz2,xz,gz}  (GA — \`apt install ${LINUX_SOURCE_PKG}\`)
+       2. /usr/src/${LINUX_SOURCE_PKG}/                  (extracted dir layout)
+       3. \$ENFS_LINUX_SOURCE_TREE override               (was empty)
+       For HWE kernels (no binary linux-source-*.tar.bz2 published),
+       run \`apt source linux-hwe-X.Y\` and either:
+         - move/symlink the extracted dir to /usr/src/${LINUX_SOURCE_PKG}/
+         - or export ENFS_LINUX_SOURCE_TREE=<extracted dir>
+       See docs/internals/10-testing-and-ci.md §10.4."
     fi
-    log "using $TARBALL"
-    # Cache key: package name + first 16 hex chars of tarball SHA. Reusing
-    # the same package version → cache hit. New package version pushed by
-    # Ubuntu → new tarball SHA → cache miss + re-extract.
-    TARBALL_SHA=$(sha256sum "$TARBALL" | cut -c1-16)
-    CACHE="$CACHE_ROOT/${LINUX_SOURCE_PKG}_${TARBALL_SHA}"
-    WANT_STAMP="${LINUX_SOURCE_PKG}_${TARBALL_SHA}"
 fi
 
 # Skip the whole pipeline if vendor dir is already at this stamp AND

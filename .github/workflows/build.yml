@@ -270,6 +270,54 @@ jobs:
           dpkg-buildpackage -us -uc -b
           ls -lh ../enfs-dkms_*.deb
 
+      - name: Stage kernel source for the runner's actual kernel
+        run: |
+          # The arm64 runner image typically runs a different kernel
+          # (e.g. 6.14.0-azure) than the matrix-target we built for.
+          # The DKMS install we're about to do will run PRE_BUILD for
+          # uname -r, which calls fetch-vendor-ubuntu.sh; that needs
+          # source for THIS runner's kernel, not the matrix one.
+          set -e
+          KVER=$(uname -r)
+          echo "Runner kernel: $KVER"
+          case "$KVER" in
+              6.14.*)
+                  pkg=linux-source-6.14.0
+                  src_pkg=linux-hwe-6.14
+                  ;;
+              6.8.*)
+                  pkg=linux-source-6.8.0
+                  src_pkg=linux
+                  ;;
+              7.0.*)
+                  pkg=linux-source-7.0.0
+                  src_pkg=linux
+                  ;;
+              *)
+                  echo "::warning::Unknown runner kernel $KVER — install-verify may fail"
+                  exit 0
+                  ;;
+          esac
+          # Try the binary deb first.
+          if sudo apt-get install -y "$pkg"; then
+              echo "binary $pkg installed at /usr/src/${pkg}.tar.bz2"
+              ls -la "/usr/src/${pkg}.tar."* || true
+          else
+              # Fall back to apt source + stage as /usr/src/<pkg>/ so
+              # the fetcher's dir-layout path picks it up.
+              sudo sed -i 's|^Types: deb$|Types: deb deb-src|' \
+                  /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+              sudo apt-get update
+              mkdir -p /tmp/runner-src && cd /tmp/runner-src
+              apt-get source "$src_pkg"
+              tree=$(find . -maxdepth 1 -type d ! -name . | head -1)
+              [ -d "$tree" ] || { echo "::error::apt source $src_pkg failed"; exit 1; }
+              sudo mkdir -p /usr/src
+              sudo ln -sf "$(realpath "$tree")" "/usr/src/$pkg"
+              echo "staged extracted source at /usr/src/$pkg → $tree"
+              ls -la "/usr/src/$pkg"
+          fi
+
       - name: dpkg install of the .deb (validates postinst on arm64)
         run: |
           # The .deb is Architecture: all so the same artefact already
