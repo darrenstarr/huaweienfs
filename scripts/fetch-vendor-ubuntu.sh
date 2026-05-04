@@ -132,10 +132,11 @@ if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$WANT_STAMP" ]; then
     fi
 fi
 
-# Extract into the cache (idempotent — keyed on tarball SHA).
-# Skipped entirely when ENFS_LINUX_SOURCE_TREE was set (SRC_TREE
-# already points to the override).
-if [ -z "${ENFS_LINUX_SOURCE_TREE:-}" ]; then
+# Extract the tarball into the cache (idempotent — keyed on tarball
+# SHA). Only runs when we have a tarball but no pre-resolved SRC_TREE.
+# When SRC_TREE is already set (override path or extracted-dir layout),
+# CACHE is unset; skip the extract block entirely.
+if [ -z "$SRC_TREE" ]; then
     mkdir -p "$CACHE"
     if [ ! -f "$CACHE/.extracted" ]; then
         log "extracting $TARBALL into cache (this can take ~30 s)"
@@ -149,10 +150,6 @@ if [ -z "${ENFS_LINUX_SOURCE_TREE:-}" ]; then
     else
         log "cache hit: $CACHE"
     fi
-
-    # Find the extracted top-level dir. Tarballs usually have a single
-    # top-level directory named like the tarball (linux-source-X.Y.Z/),
-    # but be tolerant of other prefixes.
     SRC_TREE=$(find "$CACHE" -maxdepth 1 -mindepth 1 -type d | head -1)
     [ -d "$SRC_TREE" ] || die "no extracted directory under $CACHE — corrupt tarball?"
 fi
