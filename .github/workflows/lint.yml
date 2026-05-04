@@ -56,6 +56,9 @@ jobs:
           set -e
           # Anything in 10.200.x or 10.27.x is a private LAN this dev's
           # deployment uses; should never appear in tracked files.
+          # fc07:2:: / fc07:3:: / 2001:948:61:1:: are the lab IPv6
+          # fabric (diskpool04 + OceanStor) — same rule.
+          # diskpool04 is the lab hostname; netadmin is the lab user.
           # Exclude vendor/ (upstream sources) and this workflow file
           # itself (which legitimately mentions the patterns it greps
           # for).
@@ -63,7 +66,7 @@ jobs:
               | grep -v '^vendor/' \
               | grep -v '^.github/workflows/lint.yml$' \
               | xargs grep -nE \
-              '10\.200\.|10\.27\.|10\.2\.0\.4|/opt/data/vms|/mnt/ramdisk|Minions12345|52:54:00:e2:60:33|4c:00:82:f3:84:c1' \
+              '10\.200\.|10\.27\.|10\.2\.0\.4|/opt/data/vms|/mnt/ramdisk|Minions12345|52:54:00:e2:60:33|4c:00:82:f3:84:c1|fc07:[23]|2001:948:61:1|diskpool04|\bnetadmin\b' \
               2>/dev/null; then
             echo "::error::Private deployment values found in tracked files. Move them to secrets/ (gitignored)."
             exit 1

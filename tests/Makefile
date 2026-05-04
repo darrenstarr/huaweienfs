@@ -93,10 +93,19 @@ LDLIBS := $(CHECK_LIBS) -lpthread
 # and defining ENFS_SRC_<name> and STUBS_<name>.
 # ---------------------------------------------------------------------
 
-TESTS := test_enfs_roundrobin
+TESTS := test_enfs_roundrobin test_enfs_multipath_parse
 
 ENFS_SRC_test_enfs_roundrobin := $(ENFS_SRC_ROOT)/enfs_roundrobin.c
 STUBS_test_enfs_roundrobin    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_deps_stubs.c
+
+# Address-list parser. Covers BOTH IPv4 (the production target for
+# customer storage) and IPv6 (the project lab fabric). Uses libc-
+# backed rpc_pton/rpc_cmp_addr stubs so the parser can run in
+# userspace without a kernel sunrpc layer.
+ENFS_SRC_test_enfs_multipath_parse := $(ENFS_SRC_ROOT)/enfs_multipath_parse.c
+STUBS_test_enfs_multipath_parse    := $(STUBS_DIR)/kernel_stubs.c \
+                                      $(STUBS_DIR)/enfs_deps_stubs.c \
+                                      $(STUBS_DIR)/rpc_addr_stubs.c
 
 # ---------------------------------------------------------------------
 # Build rules. Per-test we build a single binary that links the source

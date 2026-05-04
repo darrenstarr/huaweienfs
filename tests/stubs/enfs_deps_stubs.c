@@ -143,6 +143,22 @@ int32_t enfs_get_config_multipath_state(void)
     return stub_multipath_state;
 }
 
+/* enfs_config.h getters used by enfs_multipath_parse.c. Default
+ * values chosen so the parse path runs without external deps:
+ * - dns auto-multipath off
+ * - high link/mount-count limits so tests don't hit them
+ * - create-path-no-route default 0 */
+int32_t enfs_get_config_dns_auto_multipath_resolution(void) { return 0; }
+int32_t enfs_get_config_dns_update_interval(void)           { return 30; }
+int32_t enfs_get_create_path_no_route(void)                 { return 0; }
+int32_t enfs_get_config_link_count_total(void)              { return 100000; }
+int32_t enfs_get_config_link_count_per_mount(void)          { return 64; }
+int     enfs_link_count_num(void)                           { return 0; }
+int     enfs_mount_count(void)                              { return 0; }
+bool    enfs_check_config_wwn(uint64_t wwn)                 { (void)wwn; return true; }
+bool    enfs_whitelist_filte(char *ip)                       { (void)ip; return true; }
+int     GetEnfsConfigIpFiltersCount(void)                   { return 0; }
+
 int32_t enfs_get_native_link_io_status(void)
 {
     return stub_native_link_io_status;

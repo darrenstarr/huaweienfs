@@ -15,7 +15,30 @@
  *   - workqueue impl (queue_work, flush_work)
  */
 
+#include <stddef.h>
+#include <string.h>
+#include <stdlib.h>
+
 /* Empty translation unit — but force a non-empty .o so the Makefile
  * rule never produces a zero-byte object that some toolchains fuss
  * about. */
 const char kernel_stubs_marker[] = "enfs userspace test kernel_stubs";
+
+/* kstrdup: kernel string-duplicate. Userspace just defers to libc. */
+char *kstrdup(const char *s, unsigned int gfp)
+{
+    (void)gfp;
+    return s ? strdup(s) : NULL;
+}
+
+/* strscpy: kernel-style truncating copy. Returns the number of bytes
+ * copied (excluding NUL) on success, or -E2BIG if truncated. */
+long strscpy(char *dst, const char *src, size_t count)
+{
+    size_t i;
+    if (count == 0) return -7L;     /* -E2BIG */
+    for (i = 0; i + 1 < count && src[i]; i++)
+        dst[i] = src[i];
+    dst[i] = '\0';
+    return src[i] ? -7L : (long)i;
+}

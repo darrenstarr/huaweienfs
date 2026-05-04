@@ -23,6 +23,12 @@
 #include <linux/types.h>
 #include <linux/atomic.h>
 #include <linux/list.h>
+#include <linux/errno.h>
+#include <linux/slab.h>
+#include <linux/printk.h>
+/* Production NFS headers (preempted as empty stubs above) normally
+ * pull errno / slab / printk transitively. Pull them in directly
+ * here so source files don't need to know which headers we faked. */
 /* enfs_roundrobin.c uses rcu_dereference / rcu_read_lock without
  * including <linux/rcupdate.h> directly — the kernel pulls it in
  * transitively. Pull it in here so source files compile cleanly. */
@@ -34,6 +40,7 @@
 #define ENFS_CONFIG_H
 #define PM_STATE_H
 #define ENFS_PROC_H
+#define ENFS_LOG_H
 #define _NFS_ADAPTER_H_
 /* sunrpc adapter (different file, also pulled in transitively) */
 #define _SUNRPC_ENFS_ADAPTER_H_
@@ -93,6 +100,29 @@ void  xprt_set_reserve_context(struct rpc_xprt *xprt, void *context);
 /* From enfs_config.h */
 int32_t enfs_get_config_multipath_state(void);
 int32_t enfs_get_native_link_io_status(void);
+int32_t enfs_get_config_dns_auto_multipath_resolution(void);
+int32_t enfs_get_config_dns_update_interval(void);
+int32_t enfs_get_create_path_no_route(void);
+int32_t enfs_get_config_link_count_total(void);
+int32_t enfs_get_config_link_count_per_mount(void);
+int     enfs_link_count_num(void);
+int     enfs_mount_count(void);
+bool    enfs_check_config_wwn(uint64_t wwn);
+bool    enfs_whitelist_filte(char *ip);
+int     GetEnfsConfigIpFiltersCount(void);
+
+/* From enfs.h: link/mount caps */
+#define ENFS_MAX_LINK_COUNT          16384
+#define DEFAULT_ENFS_MAX_LINK_COUNT  512
+#define MIN_ENFS_MAX_LINK_COUNT      512
+#define ENFS_MAX_MOUNT_COUNT         256
+
+/* Kernel internal in4_pton / in6_pton (called by is_valid_ip_address
+ * in enfs_multipath_parse.c). Provided in tests/stubs/rpc_addr_stubs.c. */
+int in4_pton(const char *src, int srclen, unsigned char *dst, int delim,
+             const char **end);
+int in6_pton(const char *src, int srclen, unsigned char *dst, int delim,
+             const char **end);
 
 /* From pm_state.h */
 enum enfs_path_state pm_get_path_state(struct rpc_xprt *xprt);
@@ -100,5 +130,52 @@ enum enfs_path_state pm_get_path_state(struct rpc_xprt *xprt);
 /* From enfs_proc.h */
 void enfs_iter_rpc_clnt(int (*fn)(struct rpc_clnt *clnt, void *data),
                         void *data);
+
+/* ---- Below: types and helpers that enfs_multipath_parse.c uses
+ * (added when extending the test suite to cover that module). ---- */
+
+/* From enfs.h: ip-list and DNS-info types. */
+#include <sys/socket.h>     /* for sockaddr_storage */
+
+#define MAX_SUPPORTED_LOCAL_IP_COUNT      8
+#define MAX_SUPPORTED_REMOTE_IP_COUNT     1024
+#define MIN_SUPPORTED_REMOTE_IP_COUNT     2
+#define DEFAULT_SUPPORTED_REMOTE_IP_COUNT 32
+#define MAX_DNS_NAME_LEN                  512
+#define MAX_DNS_SUPPORTED                 2
+#define EXTEND_MAX_DNS_NAME_LEN           256
+#define ENFS_NOT_SUPPORT                  524
+
+struct nfs_ip_list {
+    int                     count;
+    struct sockaddr_storage address[MAX_SUPPORTED_REMOTE_IP_COUNT];
+    size_t                  addrlen[MAX_SUPPORTED_REMOTE_IP_COUNT];
+};
+
+struct enfs_dns_info_single {
+    char dnsname[MAX_DNS_NAME_LEN];
+};
+
+struct enfs_route_dns_info {
+    int dnsNameCount;
+    struct enfs_dns_info_single routeRemoteDnsList[MAX_DNS_SUPPORTED];
+};
+
+/* From enfs_log.h: production wraps pr_info/pr_err. We route through
+ * the existing pr_* shim macros (which print to stderr), keeping the
+ * "enfs:[funcname]" prefix the production format uses. */
+#define enfs_log_info(fmt, ...)  pr_info("enfs:[%s]" fmt, __func__, ##__VA_ARGS__)
+#define enfs_log_error(fmt, ...) pr_err("enfs:[%s]"  fmt, __func__, ##__VA_ARGS__)
+#define enfs_log_debug(fmt, ...) ((void)0)
+
+/* From enfs_adapter.h: the option enum used by parse_options dispatch. */
+enum nfsmultipathoptions {
+    REMOTEADDR,
+    LOCALADDR,
+    REMOTEDNSNAME,
+    REMOUNTREMOTEADDR,
+    REMOUNTLOCALADDR,
+    INVALID_OPTION
+};
 
 #endif /* ENFS_TESTS_ENFS_PREEMPT_H */

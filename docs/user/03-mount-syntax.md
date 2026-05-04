@@ -46,8 +46,14 @@ set, so the example above ends up with two transports.
 
 - Tilde (`~`), not comma — comma is reserved for separating mount
   options.
-- IPv4 only in v0. (IPv6 round-trips through the parser; live testing
-  is on the v0.2 roadmap.)
+- **Both IPv4 and IPv6 are supported.** IPv4 is the production target
+  for most customer-deployed storage (Huawei OceanStor, NetApp, etc.)
+  and is exercised in CI's smoke tests. IPv6 was validated end-to-end
+  in 2026-05 against an 8-server cluster — 16 transports up,
+  parallel-stream throughput scales linearly across all of them. For
+  IPv6, the server in the positional `server:/export` argument must
+  use the bracketed form `[2001:db8::1]:/export` and the mount must
+  carry `proto=tcp6` (or `udp6`).
 - Hostnames are accepted but resolved **once** at mount time. Use the
   DNS-rebind operation in [04-operations.md](04-operations.md) to
   re-resolve later.
@@ -173,6 +179,62 @@ The dispatcher will form up to four transports. Each transport pins
 to one source NIC, so per-NIC bandwidth tops out at the NIC's line
 rate; aggregate bandwidth is the sum across all live transports. This
 is where you see meaningful scale-out vs. single-path NFS.
+
+### IPv6 multipath: 8-server × 2-NIC layout (validated)
+
+Configurations like this run in the project's reference lab on a
+high-bandwidth IPv6 storage fabric:
+
+```bash
+sudo mount -t enfs \
+    -o vers=3,nolock,proto=tcp6,\
+remoteaddrs=2001:db8:2::11~2001:db8:2::12~2001:db8:2::13~2001:db8:2::14~2001:db8:2::15~2001:db8:2::16~2001:db8:2::17~2001:db8:2::18,\
+localaddrs=2001:db8:2::4:1~2001:db8:2::4:2 \
+    [2001:db8:2::11]:/export /mnt
+```
+
+Notes specific to IPv6:
+
+- `proto=tcp6` (or `udp6`) is required.
+- Server in the positional argument must be bracketed:
+  `[addr]:/export`. The bracket is part of mount-syntax tradition for
+  IPv6 destinations and is what the kernel mount option parser
+  expects.
+- IPs in `remoteaddrs=` and `localaddrs=` are NOT bracketed (these
+  are enfs-specific options the kernel doesn't parse for IPv6 syntax).
+- 16 transports come up (2 local × 8 remote cartesian product); each
+  shows up in `/proc/enfs/<id>/path`.
+
+**Source-routing requirement when both client NICs share a /64:**
+
+If your two storage NICs are on the **same IPv6 subnet** (a common
+high-bandwidth dual-NIC layout), Linux's main routing table will
+match either NIC for a given destination and pick whichever is
+first. Even though enfs binds half the transports to each source IP,
+**all outbound traffic will egress through one NIC** — you'll see
+ingress split correctly across both NICs (servers reply to whichever
+source they got) but egress concentrated, halving the effective
+multipath bandwidth.
+
+The fix is host-side source routing:
+
+```bash
+# One routing table per source IP, each pointing at its NIC
+sudo ip -6 route add 2001:db8:2::/64 dev <storage_nic_a> table 101
+sudo ip -6 route add 2001:db8:2::/64 dev <storage_nic_b> table 102
+sudo ip -6 rule  add from 2001:db8:2::4:1/128 lookup 101
+sudo ip -6 rule  add from 2001:db8:2::4:2/128 lookup 102
+
+# Remount — TCP sockets cache routes at connect time, so existing
+# transports keep using the old (broken) routing decision.
+sudo umount /mnt && sudo mount -t enfs ... /mnt
+```
+
+Verify with `tcpdump -i <storage_nic_a> 'ip6 and dst port 2049'` —
+should show only packets sourced from the NIC's own IP.
+
+This isn't enfs-specific (any multi-NIC IPv6 setup hits it), but it
+matters for multipath. See issue #23.
 
 ## Address-list constraints
 
