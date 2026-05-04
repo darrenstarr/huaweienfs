@@ -470,7 +470,7 @@ pure logic where iteration speed and proper debug tools matter.
 
 ### Architecture
 
-```
+```text
 tests/
 ├── kernel-shim/linux/        userspace fakes for kernel headers
 ├── kernel-shim/enfs_preempt.h force-included; preempts include

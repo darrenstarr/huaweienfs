@@ -23,7 +23,7 @@ public docs use placeholders.
 
 ## 11.1 Topology
 
-```
+```text
                           ┌──────────────────────┐
                           │ NFS storage cluster  │
                           │ (8 controller NICs)  │
@@ -122,7 +122,7 @@ cat /proc/enfs/<id>/path                   # 16 rows expected
 
 Expected output (anonymised):
 
-```
+```text
 id  local_addr        remote_addr       path_state  xprt_state
 0   <LOCAL_A>         <SRV1>            Normal      CONNECTED|BOUND
 1   <LOCAL_B>         <SRV2>            Normal      CONNECTED|BOUND
