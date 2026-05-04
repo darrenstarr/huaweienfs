@@ -22,45 +22,61 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # GA 6.8: linux-source-6.8.0 is in noble/main → use binary deb.
           - target: ubuntu-6.8
             kver-prefix: "6.8.0"
             headers: "linux-headers-generic"
             linux_source: "linux-source-6.8.0"
+            apt_source_fallback: ""  # not used when binary present
+          # HWE 6.14: NO binary linux-source-6.14.0 published. Use apt
+          # source on the linux-hwe-6.14 source package as the fallback.
           - target: ubuntu-6.14
             kver-prefix: "6.14.0"
             headers: "linux-headers-6.14.0-37-generic"
             linux_source: "linux-source-6.14.0"
+            apt_source_fallback: "linux-hwe-6.14"
     steps:
       - uses: actions/checkout@v6
 
       - name: Install build deps + matching kernel headers + source
         run: |
+          set -e
           sudo apt-get update
           sudo apt-get install -y build-essential bc kmod cpio flex bison \
               libssl-dev libelf-dev zstd dwarves bzip2 dpkg-dev
           sudo apt-get install -y ${{ matrix.headers }}
           # #16: vendor materialisation reads the kernel source from
-          # /usr/src/. For GA kernels (6.8) the linux-source-X.Y.Z
-          # binary deb provides a tarball directly. For HWE kernels
-          # (6.14) Ubuntu doesn't ship that binary deb — fall back to
-          # `apt source` (deb-src), extract once, point the fetcher at
-          # the extracted tree via ENFS_LINUX_SOURCE_TREE.
-          if apt-get install -y ${{ matrix.linux_source }} 2>/dev/null; then
+          # /usr/src/. For GA kernels the linux-source-X.Y.Z binary deb
+          # provides a tarball directly. For HWE kernels Ubuntu doesn't
+          # ship that binary deb (verified for linux-hwe-6.14 on noble:
+          # only -headers, -tools, -cloud-tools binaries are produced).
+          # Fall back to `apt source` for those targets and point the
+          # fetcher at the extracted tree via ENFS_LINUX_SOURCE_TREE.
+          set +e
+          sudo apt-get install -y ${{ matrix.linux_source }}
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
               echo "installed binary source pkg ${{ matrix.linux_source }}"
               echo "ENFS_LINUX_SOURCE_TREE=" >> "$GITHUB_ENV"
           else
-              echo "binary source pkg ${{ matrix.linux_source }} unavailable; using apt source"
-              # Enable deb-src on noble (modern apt uses deb822 .sources files).
+              fallback="${{ matrix.apt_source_fallback }}"
+              if [ -z "$fallback" ]; then
+                  echo "::error::${{ matrix.linux_source }} install failed (rc=$rc) and no apt_source_fallback configured for target ${{ matrix.target }}"
+                  exit 1
+              fi
+              echo "binary ${{ matrix.linux_source }} unavailable (rc=$rc); using apt source $fallback"
+              # Enable deb-src on noble (modern apt uses deb822-format
+              # .sources files; older format also covered).
               sudo sed -i 's|^Types: deb$|Types: deb deb-src|' \
                   /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
               sudo sed -i 's|^# deb-src|deb-src|' /etc/apt/sources.list 2>/dev/null || true
               sudo apt-get update
-              mkdir -p /tmp/hwe-src && cd /tmp/hwe-src
-              # The HWE 6.14 source package is named linux-hwe-6.14.
-              apt-get source linux-hwe-6.14
-              # apt-get source extracts the tree alongside the .dsc.
-              tree=$(find . -maxdepth 1 -type d -name 'linux-hwe-*' | head -1)
-              echo "extracted to: $tree"
+              mkdir -p /tmp/kernel-src && cd /tmp/kernel-src
+              apt-get source "$fallback"
+              tree=$(find . -maxdepth 1 -type d ! -name . | head -1)
+              [ -d "$tree" ] || { echo "::error::apt source $fallback produced no directory"; ls -la; exit 1; }
+              echo "extracted source tree: $tree"
               echo "ENFS_LINUX_SOURCE_TREE=$(realpath "$tree")" >> "$GITHUB_ENV"
           fi
 
@@ -172,31 +188,43 @@ jobs:
             kver-prefix: "6.8.0"
             headers: "linux-headers-generic"
             linux_source: "linux-source-6.8.0"
+            apt_source_fallback: ""
           - target: ubuntu-6.14
             kver-prefix: "6.14.0"
             headers: "linux-headers-6.14.0-37-generic"
             linux_source: "linux-source-6.14.0"
+            apt_source_fallback: "linux-hwe-6.14"
     steps:
       - uses: actions/checkout@v6
 
       - name: Install build deps + matching kernel headers + source
         run: |
+          set -e
           sudo apt-get update
           sudo apt-get install -y build-essential bc kmod cpio flex bison \
               libssl-dev libelf-dev zstd dwarves file bzip2 dpkg-dev
           sudo apt-get install -y ${{ matrix.headers }}
-          # See build-noble for the GA-vs-HWE rationale.
-          if apt-get install -y ${{ matrix.linux_source }} 2>/dev/null; then
+          # Same GA-vs-HWE pattern as build-noble — see comments there.
+          set +e
+          sudo apt-get install -y ${{ matrix.linux_source }}
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
               echo "ENFS_LINUX_SOURCE_TREE=" >> "$GITHUB_ENV"
           else
-              echo "binary source pkg ${{ matrix.linux_source }} unavailable; using apt source"
+              fallback="${{ matrix.apt_source_fallback }}"
+              if [ -z "$fallback" ]; then
+                  echo "::error::${{ matrix.linux_source }} install failed (rc=$rc), no fallback for ${{ matrix.target }}"
+                  exit 1
+              fi
               sudo sed -i 's|^Types: deb$|Types: deb deb-src|' \
                   /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
               sudo sed -i 's|^# deb-src|deb-src|' /etc/apt/sources.list 2>/dev/null || true
               sudo apt-get update
-              mkdir -p /tmp/hwe-src && cd /tmp/hwe-src
-              apt-get source linux-hwe-6.14
-              tree=$(find . -maxdepth 1 -type d -name 'linux-hwe-*' | head -1)
+              mkdir -p /tmp/kernel-src && cd /tmp/kernel-src
+              apt-get source "$fallback"
+              tree=$(find . -maxdepth 1 -type d ! -name . | head -1)
+              [ -d "$tree" ] || { echo "::error::apt source $fallback produced no directory"; exit 1; }
               echo "ENFS_LINUX_SOURCE_TREE=$(realpath "$tree")" >> "$GITHUB_ENV"
           fi
 
