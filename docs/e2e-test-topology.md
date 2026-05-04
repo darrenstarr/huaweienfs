@@ -52,7 +52,7 @@ flowchart TB
 The client mounts with:
 
 ```bash
-mount -t nfs \
+mount -t enfs \
   -o vers=4.1,enfs_info='remoteaddrs=10.99.0.11~10.99.0.14' \
   10.99.0.11:/srv/enfs-test  /mnt/enfs
 ```
@@ -307,7 +307,7 @@ your environment.
 
 ```bash
 # (client)
-sudo mount -t nfs \
+sudo mount -t enfs \
   -o vers=4.1,enfs_info='remoteaddrs=10.99.0.11~10.99.0.14' \
   10.99.0.11:/srv/enfs-test /mnt/enfs
 
@@ -362,7 +362,7 @@ ssh <BUILD_HOST> '
 
 ```bash
 # (client) mount with one path.
-sudo mount -t nfs \
+sudo mount -t enfs \
   -o vers=4.1,enfs_info='remoteaddrs=10.99.0.11' \
   10.99.0.11:/srv/enfs-test /mnt/enfs
 
@@ -386,7 +386,7 @@ ssh <BUILD_HOST> 'docker run -d --name e2e-dns --network=host \
   -v $PWD/tests/fixtures/dns:/etc/coredns coredns/coredns -conf /etc/coredns/Corefile'
 
 # (client)  point resolv.conf at it; mount by name.
-sudo mount -t nfs \
+sudo mount -t enfs \
   -o vers=4.1,enfs_info='remotehosts=nfs.test.local' \
   nfs.test.local:/srv/enfs-test /mnt/enfs
 

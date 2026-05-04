@@ -18,7 +18,7 @@ client. It implements:
 Mount syntax (from `vendor/openeuler/fs/nfs/enfs/enfs_multipath_parse.c`):
 
 ```bash
-mount -t nfs \
+mount -t enfs \
     -o enfs_info='remoteaddrs=192.0.2.10~192.0.2.11,localaddrs=192.0.2.100' \
     server.example.com:/export /mnt
 ```

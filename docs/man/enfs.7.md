@@ -8,7 +8,7 @@ enfs - Enhanced NFS multipath client for Linux
 
 # SYNOPSIS
 
-**mount -t nfs -o** *opts*[**,remoteaddrs=***addr1*~*addr2*~...][**,localaddrs=***addr*~...] *server*:*/export* *mountpoint*
+**mount -t enfs -o** *opts*[**,remoteaddrs=***addr1*~*addr2*~...][**,localaddrs=***addr*~...] *server*:*/export* *mountpoint*
 
 # DESCRIPTION
 
@@ -123,7 +123,7 @@ emits enfs's per-RPC and per-path-state-change traces.
 ## Multipath mount across three server VIPs
 
 ```sh
-sudo mount -t nfs -o nolock,vers=3,proto=tcp,\
+sudo mount -t enfs -o nolock,vers=3,proto=tcp,\
   remoteaddrs=10.0.0.10~10.0.0.11~10.0.0.12 \
   10.0.0.10:/export /mnt/multi
 ```
@@ -139,7 +139,7 @@ The output should show **num_xprts=3** and **num_active=3**.
 ## Multipath mount with both client- and server-side fan-out
 
 ```sh
-sudo mount -t nfs -o nolock,vers=3,proto=tcp,\
+sudo mount -t enfs -o nolock,vers=3,proto=tcp,\
   localaddrs=192.168.10.5~192.168.20.5,\
   remoteaddrs=10.0.0.10~10.0.0.11~10.0.0.12~10.0.0.13 \
   10.0.0.10:/export /mnt/multi
@@ -172,7 +172,7 @@ now shows **num_active=N-1**.
 ```sh
 echo 0x10000 | sudo tee /proc/sys/sunrpc/nfs_debug
 sudo dmesg -c >/dev/null
-sudo mount -t nfs ... # as above
+sudo mount -t enfs ... # as above
 sudo dmesg | tail -20
 ```
 

@@ -1,0 +1,90 @@
+From: enfs-dkms
+Subject: [PATCH] fs/nfs/fs_context.c: register "enfs" filesystem type (#20)
+
+Adds a third filesystem type, "enfs", as an explicit alias for the
+NFSv3-style mount path. Operators can now use:
+
+  mount -t enfs -o vers=3,nolock,remoteaddrs=A~B~C svr:/exp /mnt
+
+instead of:
+
+  mount -t nfs -o vers=3,nolock,remoteaddrs=A~B~C svr:/exp /mnt
+
+The "enfs" form makes multipath intent visible in /proc/mounts and
+/etc/fstab — operators can tell from the mount table alone whether a
+mount is multipath-enabled, without parsing the option string.
+
+Three additive hunks (all gated on CONFIG_ENFS):
+
+  1. parse_monolithic now accepts &enfs_fs_type alongside
+     &nfs_fs_type, routing it through nfs23_parse_monolithic.
+
+  2. The fs_type-correction in nfs_fs_context_validate (which
+     normally forces fc->fs_type back to ctx->nfs_mod->nfs_fs)
+     leaves &enfs_fs_type untouched, so /proc/mounts shows "enfs"
+     for enfs mounts rather than silently being normalised to "nfs".
+
+  3. The new struct file_system_type with .name="enfs", same
+     init/parameters/kill_sb as nfs_fs_type. MODULE_ALIAS_FS("enfs")
+     so request_module on the type name works.
+
+The "nfs" type continues to work with remoteaddrs= unchanged; this
+is purely additive.
+
+Issue: #20
+
+---
+--- a/fs/nfs/fs_context.c
++++ b/fs/nfs/fs_context.c
+@@ -1429,7 +1429,11 @@
+ static int nfs_fs_context_parse_monolithic(struct fs_context *fc,
+ 					   void *data)
+ {
+-	if (fc->fs_type == &nfs_fs_type)
++	if (fc->fs_type == &nfs_fs_type
++#if IS_ENABLED(CONFIG_ENFS)
++	    || fc->fs_type == &enfs_fs_type
++#endif
++	   )
+ 		return nfs23_parse_monolithic(fc, data);
+
+ #if IS_ENABLED(CONFIG_NFS_V4)
+@@ -1527,8 +1531,15 @@
+ 		ctx->nfs_mod = nfs_mod;
+ 	}
+
+-	/* Ensure the filesystem context has the correct fs_type */
+-	if (fc->fs_type != ctx->nfs_mod->nfs_fs) {
++	/* Ensure the filesystem context has the correct fs_type. The
++	 * `mount -t enfs` path is treated as v3-style (see #20), so don't
++	 * normalise it back to nfs_fs_type — that would lose the type
++	 * name in /proc/mounts. */
++	if (fc->fs_type != ctx->nfs_mod->nfs_fs
++#if IS_ENABLED(CONFIG_ENFS)
++	    && fc->fs_type != &enfs_fs_type
++#endif
++	   ) {
+ 		module_put(fc->fs_type->owner);
+ 		__module_get(ctx->nfs_mod->nfs_fs->owner);
+ 		fc->fs_type = ctx->nfs_mod->nfs_fs;
+@@ -1740,3 +1751,20 @@
+ MODULE_ALIAS("nfs4");
+ EXPORT_SYMBOL_GPL(nfs4_fs_type);
+ #endif /* CONFIG_NFS_V4 */
++
++#if IS_ENABLED(CONFIG_ENFS)
++/* Explicit alias for the v3 multipath flow. Operators mount with
++ * `mount -t enfs ...` so multipath intent is visible in /proc/mounts
++ * and /etc/fstab. The init/parameters/kill_sb path is identical to
++ * nfs_fs_type — the only thing that differs is the type name. */
++struct file_system_type enfs_fs_type = {
++	.owner			= THIS_MODULE,
++	.name			= "enfs",
++	.init_fs_context	= nfs_init_fs_context,
++	.parameters		= nfs_fs_parameters,
++	.kill_sb		= nfs_kill_super,
++	.fs_flags		= FS_RENAME_DOES_D_MOVE|FS_BINARY_MOUNTDATA,
++};
++MODULE_ALIAS_FS("enfs");
++EXPORT_SYMBOL_GPL(enfs_fs_type);
++#endif /* CONFIG_ENFS */

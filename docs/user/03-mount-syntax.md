@@ -9,13 +9,30 @@ additive.
 ## TL;DR
 
 ```bash
-sudo mount -t nfs \
+sudo mount -t enfs \
     -o vers=3,nolock,remoteaddrs=<NFS_SERVER_1>~<NFS_SERVER_2>,localaddrs=<LOCAL_NIC_1>~<LOCAL_NIC_2> \
     <NFS_SERVER_1>:/<EXPORT> <MOUNT_POINT>
 ```
 
 The mount succeeds if at least one `(localaddr, remoteaddr)` pair can
 establish a TCP connection and reach the same backing export.
+
+## Filesystem type: `enfs` vs `nfs`
+
+Both `mount -t enfs` and `mount -t nfs` work and produce the same
+behavior. `enfs` is preferred because:
+
+- `/proc/mounts` and `/etc/fstab` make the multipath nature visible
+  at a glance — no need to inspect the option string.
+- Monitoring / inventory tools can filter by type to find multipath
+  mounts.
+- The dependency on the `enfs-dkms` package is documented in the
+  mount line itself.
+
+The kernel registers `enfs` as a separate filesystem type whose mount
+path is identical to `nfs`. You can switch a fstab entry between the
+two types without re-mounting; the resulting superblock is
+byte-identical. See issue #20.
 
 ## Options reference
 
@@ -87,7 +104,7 @@ flowchart LR
 ```
 
 ```bash
-sudo mount -t nfs \
+sudo mount -t enfs \
     -o vers=3,nolock,remoteaddrs=<NFS_SERVER_1>~<NFS_SERVER_2> \
     <NFS_SERVER_1>:/<EXPORT> <MOUNT_POINT>
 ```
@@ -114,7 +131,7 @@ flowchart LR
 ```
 
 ```bash
-sudo mount -t nfs \
+sudo mount -t enfs \
     -o vers=3,nolock,remoteaddrs=<NFS_SERVER_1>~<NFS_SERVER_2>~<NFS_SERVER_3>~<NFS_SERVER_4> \
     <NFS_SERVER_1>:/<EXPORT> <MOUNT_POINT>
 ```
@@ -147,7 +164,7 @@ flowchart LR
 ```
 
 ```bash
-sudo mount -t nfs \
+sudo mount -t enfs \
     -o vers=3,nolock,remoteaddrs=<NFS_SERVER_1>~<NFS_SERVER_2>,localaddrs=<LOCAL_NIC_1>~<LOCAL_NIC_2> \
     <NFS_SERVER_1>:/<EXPORT> <MOUNT_POINT>
 ```
