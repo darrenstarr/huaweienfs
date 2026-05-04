@@ -50,58 +50,63 @@ enfs_lb_set_cursor_xprt(struct rpc_xprt_switch *xps, struct rpc_xprt **cursor,
 	return pos;
 }
 
+/*
+ * Pure round-robin: walk the xprt list from `cur+1`, skipping inactive
+ * transports and (when the native link is down) the main one. Returns
+ * the first eligible xprt; wraps to the head of the list if `cur` was
+ * the last one.
+ *
+ * Replaced the original "least-queued masquerading as round-robin"
+ * algorithm in favour of true round-robin for two measured reasons:
+ *
+ *   1. Sync I/O dispatch (psync, direct I/O — the project's main
+ *      lab/customer workload) only ever has 1 RPC in flight per task,
+ *      so atomic_long_read(&ctx->queuelen) was uniformly 0 across all
+ *      xprts at decision time. The "least-queued" tie-break never had
+ *      anything to break ties on; the algorithm degenerated to "first
+ *      active xprt" with extra atomic reads.
+ *
+ *   2. At the high-IOPS regime where queuelen variance becomes real
+ *      (DPC-equivalent, > 100 K IOPS aggregate), the per-dispatch
+ *      atomic reads across ~16 transports become a measurable
+ *      cacheline-bouncing cost that pure round-robin avoids entirely.
+ *
+ * See docs/internals/12-perf-tuning.md §12.4.1 for the analysis +
+ * benchmark numbers.
+ */
 static struct rpc_xprt *
 enfs_lb_find_next_entry_roundrobin(struct rpc_xprt_switch *xps,
 				   const struct rpc_xprt *cur)
 {
 	struct rpc_xprt *pos;
-	struct rpc_xprt *prev = NULL;
-	bool found = false;
-	struct rpc_xprt *min_queuelen_xprt = NULL;
-	unsigned long pos_xprt_queuelen;
-	unsigned long min_xprt_queuelen = 0;
-	struct enfs_xprt_context *ctx;
-	struct rpc_xprt *optimal_xprt = NULL;
-	unsigned long optimal_queuelen = 0;
+	struct rpc_xprt *first_eligible = NULL;
+	bool past_cur = (cur == NULL);
 	int nativeLinkStatus = enfs_get_native_link_io_status();
 
 	list_for_each_entry_rcu(pos, &xps->xps_xprt_list, xprt_switch) {
-		if (!nativeLinkStatus && enfs_is_main_xprt(pos))
-			continue;
+		bool eligible =
+			(nativeLinkStatus || !enfs_is_main_xprt(pos)) &&
+			enfs_xprt_is_active(pos);
 
-		if (!enfs_xprt_is_active(pos)) {
-			prev = pos;
-			continue;
-		}
-
-		ctx = xprt_get_reserve_context(pos);
-		pos_xprt_queuelen = atomic_long_read(&ctx->queuelen);
-		if (min_queuelen_xprt == NULL ||
-		    pos_xprt_queuelen < min_xprt_queuelen) {
-			/* Find the xprt with the smallest number of IO in the full-linked list. */
-			min_queuelen_xprt = pos;
-			min_xprt_queuelen = pos_xprt_queuelen;
-		}
-		if (cur == prev)
-			found = true;
-
-		if (found && (optimal_xprt == NULL ||
-			      optimal_queuelen < min_xprt_queuelen)) {
-			/* From the subsequent linked list where the xprt has been selected,
-			 * select the xprt for minimum IO
-			 */
-			if (min_xprt_queuelen == 0) {
-				/* Minimum xprt, there is no need to traverse subsequent queues. */
+		if (eligible) {
+			/* Track the first eligible xprt so we can wrap the
+			 * cursor to the head of the list when `cur` is the
+			 * last one. */
+			if (first_eligible == NULL)
+				first_eligible = pos;
+			if (past_cur)
 				return pos;
-			}
-			optimal_xprt = pos;
-			optimal_queuelen = pos_xprt_queuelen;
 		}
-		prev = pos;
-	};
-	if (optimal_xprt != NULL)
-		return optimal_xprt;
-	return min_queuelen_xprt;
+		/* Mark cursor passage even for ineligible (inactive / main-
+		 * skipped) xprts so a cursor pointing at one still advances
+		 * to the next eligible xprt rather than wrapping to head. */
+		if (pos == cur)
+			past_cur = true;
+	}
+	/* Cursor was past the end (or `cur` is no longer in the list);
+	 * wrap to the first eligible xprt. NULL if list is empty / all
+	 * xprts inactive — caller falls back to the main xprt. */
+	return first_eligible;
 }
 
 struct rpc_xprt *

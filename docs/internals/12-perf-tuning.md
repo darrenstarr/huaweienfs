@@ -123,8 +123,9 @@ Two facts dominate:
 - `enfs_read_2m` single-stream and 4-stream **hung indefinitely** on
   first attempt (28+ status reports with zero throughput, ~5 min
   wall, `D state` (uninterruptible disk sleep), no client-side
-  errors). Recovered after kill+retry. Filed as issue #__ (TBD)
-  before tuning runs.
+  errors). Recovered after kill+retry. **Filed as
+  [#27](https://github.com/darrenstarr/huaweienfs/issues/27)** at
+  the start of the tuning runs.
 
 ## 12.3 Tier 1 — sysctl / mount tuning, no enfs code changes
 

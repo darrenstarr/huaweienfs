@@ -153,61 +153,54 @@ END_TEST
 
 START_TEST(round_robin_advances_cursor)
 {
-    /* Three active xprts, all queuelen 0 → algorithm should pick
-     * the one *after* cur. With cur=NULL the first iteration picks
-     * the first xprt with min queuelen (which is the head). With
-     * cur=that xprt, the next call picks the second. */
+    /* Three active xprts. Pure round-robin returns the next eligible
+     * xprt after `cur`, wrapping back to head on the last. */
     struct rpc_xprt_switch *xps = make_xps();
     struct rpc_xprt *a = make_xprt(0, false, PM_STATE_NORMAL);
     struct rpc_xprt *b = make_xprt(0, false, PM_STATE_NORMAL);
     struct rpc_xprt *c = make_xprt(0, false, PM_STATE_NORMAL);
     xps_add(xps, a); xps_add(xps, b); xps_add(xps, c);
 
-    /* Algorithm with min_queuelen==0 short-circuits to "return first
-     * xprt found after cursor with queuelen==0". So the sequence
-     * with cur null then cur=result is: pick after-cur with
-     * queuelen 0. With cur=NULL, prev starts NULL, found becomes
-     * true at the first iteration, so it returns `a`. */
-    struct rpc_xprt *first = enfs_lb_find_next_entry_roundrobin(xps, NULL);
-    ck_assert_ptr_eq(first, a);
-
-    struct rpc_xprt *second = enfs_lb_find_next_entry_roundrobin(xps, a);
-    ck_assert_ptr_eq(second, b);
-
-    struct rpc_xprt *third = enfs_lb_find_next_entry_roundrobin(xps, b);
-    ck_assert_ptr_eq(third, c);
+    /* cur=NULL: first eligible is `a`. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), a);
+    /* cur=a → next eligible is `b`. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, a), b);
+    /* cur=b → `c`. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, b), c);
+    /* cur=c (last) → wraps to first eligible, `a`. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, c), a);
 }
 END_TEST
 
 START_TEST(inactive_xprt_is_never_returned)
 {
-    /* The algorithm uses `prev` tracking that includes inactive
-     * xprts (prev is updated even when an inactive is skipped).
-     * That means when an inactive sits between cur and the next
-     * active, the `cur == prev` check never fires, and the function
-     * falls through to "minimum-queuelen xprt seen so far" — which
-     * with queuelen=0 everywhere is the first active, `a`.
-     *
-     * What's important to verify: an inactive xprt (b) is NEVER
-     * returned by the selection function, no matter the cursor.
-     */
+    /* Pure round-robin skips inactive xprts entirely (no `prev`
+     * tracking). With three xprts where b is inactive, advancing
+     * from any cursor lands on the next eligible xprt, never on b. */
     struct rpc_xprt_switch *xps = make_xps();
     struct rpc_xprt *a = make_xprt(0, false, PM_STATE_NORMAL);
     struct rpc_xprt *b = make_xprt(0, false, PM_STATE_FAULT);   /* inactive */
     struct rpc_xprt *c = make_xprt(0, false, PM_STATE_NORMAL);
     xps_add(xps, a); xps_add(xps, b); xps_add(xps, c);
 
-    /* With cur set to the inactive xprt itself, found becomes true
-     * after iter 2 (where pos=b matches cur). Iter 3 pos=c is then
-     * active+found so c is returned. */
-    struct rpc_xprt *got = enfs_lb_find_next_entry_roundrobin(xps, b);
-    ck_assert_ptr_eq(got, c);
+    /* cur=a → walk to b (inactive, skipped) → c is next eligible. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, a), c);
 
-    /* With cur=NULL: queuelen-tied, picks first active. Importantly,
-     * never returns b. */
-    got = enfs_lb_find_next_entry_roundrobin(xps, NULL);
-    ck_assert_ptr_ne(got, b);
-    ck_assert_ptr_nonnull(got);
+    /* cur=NULL → first eligible is a, b is inactive. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), a);
+
+    /* cur=b: cursor points at the inactive xprt itself. The cursor-
+     * passage check fires on b even though b isn't returnable, so
+     * the next eligible (c) is selected. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, b), c);
+
+    /* cur=c (last) → wraps to first eligible, a (b stays skipped). */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, c), a);
+
+    /* Inactive xprt b is NEVER returned, regardless of cursor. */
+    struct rpc_xprt *cursors[] = {NULL, a, b, c};
+    for (int i = 0; i < 4; i++)
+        ck_assert_ptr_ne(enfs_lb_find_next_entry_roundrobin(xps, cursors[i]), b);
 }
 END_TEST
 
@@ -379,20 +372,28 @@ END_TEST
  * queuelen path (lines 97-103). With non-zero queuelens the early
  * `if (min_xprt_queuelen == 0) return pos` doesn't fire, so the
  * algorithm assigns optimal_xprt and returns it after the loop. */
-START_TEST(rr_picks_lowest_queuelen_optimal_path)
+START_TEST(rr_ignores_queuelen)
 {
+    /* Pure round-robin (Tier 2) doesn't read queuelen — it only
+     * advances the cursor to the next eligible xprt. So with cur=a,
+     * the next selection is b regardless of which xprt has the
+     * lowest queuelen.
+     *
+     * Replaces the previous "least-queued" semantics that was
+     * removed in the Tier 2 perf optimization (see
+     * docs/internals/12-perf-tuning.md §12.4.1). */
     struct rpc_xprt_switch *xps = make_xps();
     struct rpc_xprt *a = make_xprt(/*qlen*/10, false, PM_STATE_NORMAL);
     struct rpc_xprt *b = make_xprt(/*qlen*/ 5, false, PM_STATE_NORMAL);
     struct rpc_xprt *c = make_xprt(/*qlen*/20, false, PM_STATE_NORMAL);
     xps_add(xps, a); xps_add(xps, b); xps_add(xps, c);
 
-    /* cur=a → found becomes true at iter for b. b has lower queuelen
-     * (5) than the running min (10 from a). Optimal selection logic
-     * (line 97-98) sets optimal_xprt=b, optimal_queuelen=5. c has
-     * queuelen 20 > 5, so doesn't replace. Return optimal=b. */
-    struct rpc_xprt *got = enfs_lb_find_next_entry_roundrobin(xps, a);
-    ck_assert_ptr_eq(got, b);
+    /* cur=a → next eligible is b (regardless of c having higher qlen). */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, a), b);
+    /* cur=b → c (no least-queued backtrack to a). */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, b), c);
+    /* cur=c → wrap to a. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, c), a);
 }
 END_TEST
 
@@ -862,7 +863,7 @@ static Suite *roundrobin_suite(void)
     TCase *tc_branches = tcase_create("branches");
     tcase_add_checked_fixture(tc_branches, setup, teardown);
     tcase_add_test(tc_branches, rr_skips_main_when_native_link_down);
-    tcase_add_test(tc_branches, rr_picks_lowest_queuelen_optimal_path);
+    tcase_add_test(tc_branches, rr_ignores_queuelen);
     tcase_add_test(tc_branches, find_first_active_returns_null_when_all_inactive);
     tcase_add_test(tc_branches, rr_wrapper_returns_find_next_result);
     tcase_add_test(tc_branches, rr_wrapper_falls_back_to_main_on_empty);
