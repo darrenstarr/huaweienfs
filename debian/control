@@ -2,7 +2,7 @@ Source: enfs-dkms
 Section: kernel
 Priority: optional
 Maintainer: Darren <darren@example.invalid>
-Build-Depends: debhelper-compat (= 13), dkms, devscripts, pandoc
+Build-Depends: debhelper-compat (= 13), dh-dkms, dkms, devscripts, pandoc
 Standards-Version: 4.6.2
 Homepage: https://gitee.com/openeuler/kernel
 Vcs-Git: https://example.invalid/enfs-dkms.git
