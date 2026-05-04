@@ -18,15 +18,24 @@
 #   vendor/<target>/                    materialised — gitignored except
 #                                       for UPSTREAM-REVISION + MANIFEST.
 #
-# Source of the kernel tree:
-#   /usr/src/<LINUX_SOURCE_PKG>.tar.{bz2,xz,gz}   provided by Ubuntu's
+# Source of the kernel tree (in priority order):
+#   1. $ENFS_LINUX_SOURCE_TREE                    pre-extracted source tree
+#                                                 dir; copy directly from it.
+#                                                 Use for HWE kernels (no
+#                                                 linux-source-X.Y.Z binary
+#                                                 deb exists for those —
+#                                                 see #16) or any custom
+#                                                 setup.
+#   2. /usr/src/<LINUX_SOURCE_PKG>.tar.{bz2,xz,gz}
+#                                                 provided by Ubuntu's
 #                                                 linux-source-X.Y.Z
 #                                                 package (apt install).
+#                                                 Available for GA kernels.
 #
 # Cache:
 #   $ENFS_VENDOR_CACHE (defaults to $HOME/.cache/enfs-vendor),
-#   keyed by ${LINUX_SOURCE_PKG}_<tarball-sha-prefix> so subsequent runs
-#   are no-ops when the installed package hasn't been replaced.
+#   keyed by ${LINUX_SOURCE_PKG}_<sha-prefix> so subsequent runs are
+#   no-ops when the source hasn't changed.
 #
 # Network: NONE. This script never reaches the internet. If the
 # expected linux-source package isn't installed, it errors with a
@@ -61,33 +70,48 @@ See vendor/ubuntu-6.8/UPSTREAM-REVISION for the new format."
     die "$PIN_FILE missing LINUX_SOURCE_PKG="
 fi
 
-# Locate the tarball. Ubuntu ships it at /usr/src/<pkg>.tar.<ext>; the
-# package may use bzip2, xz, or (older) gzip. Try in that order. The
-# tarball is usually a symlink pointing inside /usr/src/<pkg>/ — that
-# resolves transparently.
+# Resolve the source tree. Two paths:
+#   (a) ENFS_LINUX_SOURCE_TREE points to an already-extracted dir
+#       (HWE / custom setup). Use it directly; no extraction.
+#   (b) /usr/src/${LINUX_SOURCE_PKG}.tar.* (linux-source-X.Y.Z apt
+#       package). Extract to cache.
+SRC_TREE=
 TARBALL=
-for ext in bz2 xz gz; do
-    candidate="/usr/src/${LINUX_SOURCE_PKG}.tar.${ext}"
-    if [ -f "$candidate" ]; then
-        TARBALL="$candidate"
-        break
-    fi
-done
 
-if [ -z "$TARBALL" ]; then
-    die "missing /usr/src/${LINUX_SOURCE_PKG}.tar.{bz2,xz,gz}
+if [ -n "${ENFS_LINUX_SOURCE_TREE:-}" ]; then
+    SRC_TREE="$ENFS_LINUX_SOURCE_TREE"
+    [ -d "$SRC_TREE" ] || die "ENFS_LINUX_SOURCE_TREE=$SRC_TREE is not a directory"
+    log "using pre-extracted tree at $SRC_TREE (override)"
+    # Cache key derives from the override path so swapping trees
+    # invalidates appropriately. Hash the absolute path; trees with
+    # the same path are assumed identical.
+    SRC_KEY=$(printf '%s' "$SRC_TREE" | sha256sum | cut -c1-16)
+    WANT_STAMP="override_${SRC_KEY}"
+else
+    for ext in bz2 xz gz; do
+        candidate="/usr/src/${LINUX_SOURCE_PKG}.tar.${ext}"
+        if [ -f "$candidate" ]; then
+            TARBALL="$candidate"
+            break
+        fi
+    done
+
+    if [ -z "$TARBALL" ]; then
+        die "missing /usr/src/${LINUX_SOURCE_PKG}.tar.{bz2,xz,gz}
        Install with:  sudo apt install ${LINUX_SOURCE_PKG}
-       (the package ships the tarball under /usr/src/; nothing else needed.)"
+       (the package ships the tarball under /usr/src/; nothing else needed.)
+       OR set ENFS_LINUX_SOURCE_TREE=/path/to/extracted/linux-X.Y.Z to
+       point at an already-extracted source tree (HWE workflow — see
+       docs/internals/10-testing-and-ci.md §10.4)."
+    fi
+    log "using $TARBALL"
+    # Cache key: package name + first 16 hex chars of tarball SHA. Reusing
+    # the same package version → cache hit. New package version pushed by
+    # Ubuntu → new tarball SHA → cache miss + re-extract.
+    TARBALL_SHA=$(sha256sum "$TARBALL" | cut -c1-16)
+    CACHE="$CACHE_ROOT/${LINUX_SOURCE_PKG}_${TARBALL_SHA}"
+    WANT_STAMP="${LINUX_SOURCE_PKG}_${TARBALL_SHA}"
 fi
-
-log "using $TARBALL"
-
-# Cache key: package name + first 16 hex chars of tarball SHA. Reusing
-# the same package version → cache hit. New package version pushed by
-# Ubuntu → new tarball SHA → cache miss + re-extract.
-TARBALL_SHA=$(sha256sum "$TARBALL" | cut -c1-16)
-CACHE="$CACHE_ROOT/${LINUX_SOURCE_PKG}_${TARBALL_SHA}"
-WANT_STAMP="${LINUX_SOURCE_PKG}_${TARBALL_SHA}"
 
 # Skip the whole pipeline if vendor dir is already at this stamp AND
 # at least one MANIFEST entry exists (catches a half-deleted tree).
@@ -101,25 +125,29 @@ if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$WANT_STAMP" ]; then
 fi
 
 # Extract into the cache (idempotent — keyed on tarball SHA).
-mkdir -p "$CACHE"
-if [ ! -f "$CACHE/.extracted" ]; then
-    log "extracting $TARBALL into cache (this can take ~30 s)"
-    case "$TARBALL" in
-        *.tar.bz2) tar -C "$CACHE" -xjf "$TARBALL" ;;
-        *.tar.xz)  tar -C "$CACHE" -xJf "$TARBALL" ;;
-        *.tar.gz)  tar -C "$CACHE" -xzf "$TARBALL" ;;
-        *)         die "unrecognised tarball extension: $TARBALL" ;;
-    esac
-    touch "$CACHE/.extracted"
-else
-    log "cache hit: $CACHE"
-fi
+# Skipped entirely when ENFS_LINUX_SOURCE_TREE was set (SRC_TREE
+# already points to the override).
+if [ -z "${ENFS_LINUX_SOURCE_TREE:-}" ]; then
+    mkdir -p "$CACHE"
+    if [ ! -f "$CACHE/.extracted" ]; then
+        log "extracting $TARBALL into cache (this can take ~30 s)"
+        case "$TARBALL" in
+            *.tar.bz2) tar -C "$CACHE" -xjf "$TARBALL" ;;
+            *.tar.xz)  tar -C "$CACHE" -xJf "$TARBALL" ;;
+            *.tar.gz)  tar -C "$CACHE" -xzf "$TARBALL" ;;
+            *)         die "unrecognised tarball extension: $TARBALL" ;;
+        esac
+        touch "$CACHE/.extracted"
+    else
+        log "cache hit: $CACHE"
+    fi
 
-# Find the extracted top-level dir. Tarballs usually have a single
-# top-level directory named like the tarball (linux-source-X.Y.Z/),
-# but be tolerant of other prefixes.
-SRC_TREE=$(find "$CACHE" -maxdepth 1 -mindepth 1 -type d | head -1)
-[ -d "$SRC_TREE" ] || die "no extracted directory under $CACHE — corrupt tarball?"
+    # Find the extracted top-level dir. Tarballs usually have a single
+    # top-level directory named like the tarball (linux-source-X.Y.Z/),
+    # but be tolerant of other prefixes.
+    SRC_TREE=$(find "$CACHE" -maxdepth 1 -mindepth 1 -type d | head -1)
+    [ -d "$SRC_TREE" ] || die "no extracted directory under $CACHE — corrupt tarball?"
+fi
 
 # Materialise vendor/$TARGET/ from MANIFEST. Build into a sibling dir
 # then atomically swap, so a half-finished run doesn't leave the repo

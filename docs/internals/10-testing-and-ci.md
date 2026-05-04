@@ -235,6 +235,35 @@ There are two callers:
   `.deb` `Depends: linux-source` so a sane default is pulled in
   automatically.
 
+### HWE-kernel workaround (no binary `linux-source-*.tar.bz2`)
+
+Ubuntu's `linux-hwe-X.Y` source packages **don't** produce a
+`linux-source-X.Y.Z` binary deb (verified for `linux-hwe-6.14` on
+24.04 noble — only `-headers`, `-tools`, `-cloud-tools` are built).
+For HWE targets the workflow is:
+
+```bash
+# Enable deb-src (modern apt: deb822-format .sources file)
+sudo sed -i 's|^Types: deb$|Types: deb deb-src|' \
+    /etc/apt/sources.list.d/ubuntu.sources
+sudo apt-get update
+
+# Download + extract the HWE source via apt source
+mkdir -p /tmp/hwe-src && cd /tmp/hwe-src
+apt-get source linux-hwe-6.14
+
+# Point the fetcher at the extracted tree
+export ENFS_LINUX_SOURCE_TREE="$(realpath linux-hwe-*)"
+make port TARGET=ubuntu-6.14
+```
+
+The `ENFS_LINUX_SOURCE_TREE` environment variable bypasses the
+`/usr/src/<pkg>.tar.*` lookup and uses the supplied directory
+directly. Set it (empty string) to fall back to the GA path. The
+CI workflow ([`build.yml`](../../.github/workflows/build.yml))
+implements this fallback automatically: it tries the binary
+package first and falls back to `apt source` if missing.
+
 This split solves the impossible-cross-distro requirement: the .deb
 build host doesn't need any kernel source at all, and the user's
 machine only needs source matching its own kernel.

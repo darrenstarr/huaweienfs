@@ -37,12 +37,32 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc kmod cpio flex bison \
-              libssl-dev libelf-dev zstd dwarves bzip2
+              libssl-dev libelf-dev zstd dwarves bzip2 dpkg-dev
           sudo apt-get install -y ${{ matrix.headers }}
-          # #16: vendor materialisation now reads the linux-source-X.Y.Z
-          # tarball from /usr/src/, not the internet. Install the matching
-          # package here.
-          sudo apt-get install -y ${{ matrix.linux_source }}
+          # #16: vendor materialisation reads the kernel source from
+          # /usr/src/. For GA kernels (6.8) the linux-source-X.Y.Z
+          # binary deb provides a tarball directly. For HWE kernels
+          # (6.14) Ubuntu doesn't ship that binary deb — fall back to
+          # `apt source` (deb-src), extract once, point the fetcher at
+          # the extracted tree via ENFS_LINUX_SOURCE_TREE.
+          if apt-get install -y ${{ matrix.linux_source }} 2>/dev/null; then
+              echo "installed binary source pkg ${{ matrix.linux_source }}"
+              echo "ENFS_LINUX_SOURCE_TREE=" >> "$GITHUB_ENV"
+          else
+              echo "binary source pkg ${{ matrix.linux_source }} unavailable; using apt source"
+              # Enable deb-src on noble (modern apt uses deb822 .sources files).
+              sudo sed -i 's|^Types: deb$|Types: deb deb-src|' \
+                  /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+              sudo sed -i 's|^# deb-src|deb-src|' /etc/apt/sources.list 2>/dev/null || true
+              sudo apt-get update
+              mkdir -p /tmp/hwe-src && cd /tmp/hwe-src
+              # The HWE 6.14 source package is named linux-hwe-6.14.
+              apt-get source linux-hwe-6.14
+              # apt-get source extracts the tree alongside the .dsc.
+              tree=$(find . -maxdepth 1 -type d -name 'linux-hwe-*' | head -1)
+              echo "extracted to: $tree"
+              echo "ENFS_LINUX_SOURCE_TREE=$(realpath "$tree")" >> "$GITHUB_ENV"
+          fi
 
       - name: Cache fetched Ubuntu kernel source
         uses: actions/cache@v4
@@ -163,11 +183,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc kmod cpio flex bison \
-              libssl-dev libelf-dev zstd dwarves file bzip2
+              libssl-dev libelf-dev zstd dwarves file bzip2 dpkg-dev
           sudo apt-get install -y ${{ matrix.headers }}
-          # #16: vendor materialisation reads /usr/src/linux-source-X.Y.Z
-          # — install the matching package.
-          sudo apt-get install -y ${{ matrix.linux_source }}
+          # See build-noble for the GA-vs-HWE rationale.
+          if apt-get install -y ${{ matrix.linux_source }} 2>/dev/null; then
+              echo "ENFS_LINUX_SOURCE_TREE=" >> "$GITHUB_ENV"
+          else
+              echo "binary source pkg ${{ matrix.linux_source }} unavailable; using apt source"
+              sudo sed -i 's|^Types: deb$|Types: deb deb-src|' \
+                  /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+              sudo sed -i 's|^# deb-src|deb-src|' /etc/apt/sources.list 2>/dev/null || true
+              sudo apt-get update
+              mkdir -p /tmp/hwe-src && cd /tmp/hwe-src
+              apt-get source linux-hwe-6.14
+              tree=$(find . -maxdepth 1 -type d -name 'linux-hwe-*' | head -1)
+              echo "ENFS_LINUX_SOURCE_TREE=$(realpath "$tree")" >> "$GITHUB_ENV"
+          fi
 
       - name: Cache fetched Ubuntu kernel source
         uses: actions/cache@v4
