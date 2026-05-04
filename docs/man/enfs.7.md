@@ -69,9 +69,8 @@ addition to the standard NFS mount options documented in **nfs(5)**.
     **remoteaddrs=** and your client list in **localaddrs=**.
 
 **slookupcache=**_seconds_, **alookupcache=**_seconds_
-:   Server-side and arm-side lookup-cache timeouts for the enfs DNS
-    rebind helper. Defaults are conservative; raise only if you
-    re-resolve hostnames frequently.
+:   Unused legacy compatibility options for prior OpenEuler mount syntax. The
+    parser accepts and ignores it.
 
 All standard **nfs(5)** options (**vers=**, **proto=**, **rsize=**,
 **wsize=**, **soft**, **hard**, **timeo=**, **retrans=**, **nolock**,
