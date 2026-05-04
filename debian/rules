@@ -37,14 +37,19 @@ override_dh_auto_build:
 	#                            dkms.conf inside the .deb.
 	sed 's|@VERSION@|$(DEB_VERSION_UPSTREAM)|g' dkms.conf.in > dkms.conf
 	sed 's|@VERSION@|#MODULE_VERSION#|g'        dkms.conf.in > debian/enfs-dkms.dkms
-	# vendor/ubuntu-X.Y/ trees aren't tracked in git — only their
-	# UPSTREAM-REVISION pin + MANIFEST. Materialise them so the
-	# subsequent dh_auto_install copies real source into the .deb's
-	# /usr/src/enfs-<ver>/ tree (where DKMS on the user's machine
-	# expects to find it).
-	scripts/fetch-vendor-ubuntu.sh ubuntu-6.8
-	scripts/fetch-vendor-ubuntu.sh ubuntu-6.14
-	scripts/fetch-vendor-ubuntu.sh ubuntu-7.0
+	# Note (#16, 2026-05-04): we no longer fetch vendor/ubuntu-X.Y/
+	# kernel trees at .deb build time. Instead the DKMS PRE_BUILD
+	# hook on the user's machine fetches the relevant target's tree
+	# from the user's own /usr/src/linux-source-X.Y.tar.* (provided
+	# by the linux-source apt package). The .deb only ships the
+	# UPSTREAM-REVISION + MANIFEST per target — the kernel source
+	# stays out of the package entirely.
+	#
+	# Why: avoids the 30+ MB of duplicated kernel source in the
+	# .deb, and removes the cross-distro requirement that the .deb
+	# build host have all three linux-source-X.Y packages installed
+	# (impossible on a single Ubuntu version).
+	#
 	# Generate enfs(7) man page from markdown source via pandoc;
 	# debian/enfs-dkms.manpages declares it for dh_installman.
 	$(MAKE) manpage

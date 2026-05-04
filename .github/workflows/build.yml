@@ -22,22 +22,63 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # GA 6.8: linux-source-6.8.0 is in noble/main → use binary deb.
           - target: ubuntu-6.8
             kver-prefix: "6.8.0"
             headers: "linux-headers-generic"
+            linux_source: "linux-source-6.8.0"
+            apt_source_fallback: ""  # not used when binary present
+          # HWE 6.14: NO binary linux-source-6.14.0 published. Use apt
+          # source on the linux-hwe-6.14 source package as the fallback.
           - target: ubuntu-6.14
             kver-prefix: "6.14.0"
             headers: "linux-headers-6.14.0-37-generic"
+            linux_source: "linux-source-6.14.0"
+            apt_source_fallback: "linux-hwe-6.14"
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install build deps + matching kernel headers
+      - name: Install build deps + matching kernel headers + source
         run: |
+          set -e
           sudo apt-get update
           sudo apt-get install -y build-essential bc kmod cpio flex bison \
-              libssl-dev libelf-dev zstd dwarves \
-              devscripts dpkg-dev
+              libssl-dev libelf-dev zstd dwarves bzip2 dpkg-dev
           sudo apt-get install -y ${{ matrix.headers }}
+          # #16: vendor materialisation reads the kernel source from
+          # /usr/src/. For GA kernels the linux-source-X.Y.Z binary deb
+          # provides a tarball directly. For HWE kernels Ubuntu doesn't
+          # ship that binary deb (verified for linux-hwe-6.14 on noble:
+          # only -headers, -tools, -cloud-tools binaries are produced).
+          # Fall back to `apt source` for those targets and point the
+          # fetcher at the extracted tree via ENFS_LINUX_SOURCE_TREE.
+          set +e
+          sudo apt-get install -y ${{ matrix.linux_source }}
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+              echo "installed binary source pkg ${{ matrix.linux_source }}"
+              echo "ENFS_LINUX_SOURCE_TREE=" >> "$GITHUB_ENV"
+          else
+              fallback="${{ matrix.apt_source_fallback }}"
+              if [ -z "$fallback" ]; then
+                  echo "::error::${{ matrix.linux_source }} install failed (rc=$rc) and no apt_source_fallback configured for target ${{ matrix.target }}"
+                  exit 1
+              fi
+              echo "binary ${{ matrix.linux_source }} unavailable (rc=$rc); using apt source $fallback"
+              # Enable deb-src on noble (modern apt uses deb822-format
+              # .sources files; older format also covered).
+              sudo sed -i 's|^Types: deb$|Types: deb deb-src|' \
+                  /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+              sudo sed -i 's|^# deb-src|deb-src|' /etc/apt/sources.list 2>/dev/null || true
+              sudo apt-get update
+              mkdir -p /tmp/kernel-src && cd /tmp/kernel-src
+              apt-get source "$fallback"
+              tree=$(find . -maxdepth 1 -type d ! -name . | head -1)
+              [ -d "$tree" ] || { echo "::error::apt source $fallback produced no directory"; ls -la; exit 1; }
+              echo "extracted source tree: $tree"
+              echo "ENFS_LINUX_SOURCE_TREE=$(realpath "$tree")" >> "$GITHUB_ENV"
+          fi
 
       - name: Cache fetched Ubuntu kernel source
         uses: actions/cache@v4
@@ -84,13 +125,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install build deps + 7.0 headers
+      - name: Install build deps + 7.0 headers + source
         run: |
           apt-get update
           apt-get install -y build-essential bc kmod cpio flex bison \
-              libssl-dev libelf-dev zstd dwarves make \
-              devscripts dpkg-dev \
+              libssl-dev libelf-dev zstd dwarves make bzip2 \
               linux-headers-generic
+          # #16: vendor materialisation reads /usr/src/linux-source-7.0.0.tar.*
+          apt-get install -y linux-source-7.0.0
 
       - name: Cache fetched Ubuntu kernel source
         uses: actions/cache@v4
@@ -145,19 +187,46 @@ jobs:
           - target: ubuntu-6.8
             kver-prefix: "6.8.0"
             headers: "linux-headers-generic"
+            linux_source: "linux-source-6.8.0"
+            apt_source_fallback: ""
           - target: ubuntu-6.14
             kver-prefix: "6.14.0"
             headers: "linux-headers-6.14.0-37-generic"
+            linux_source: "linux-source-6.14.0"
+            apt_source_fallback: "linux-hwe-6.14"
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install build deps + matching kernel headers
+      - name: Install build deps + matching kernel headers + source
         run: |
+          set -e
           sudo apt-get update
           sudo apt-get install -y build-essential bc kmod cpio flex bison \
-              libssl-dev libelf-dev zstd dwarves file \
-              devscripts dpkg-dev
+              libssl-dev libelf-dev zstd dwarves file bzip2 dpkg-dev
           sudo apt-get install -y ${{ matrix.headers }}
+          # Same GA-vs-HWE pattern as build-noble — see comments there.
+          set +e
+          sudo apt-get install -y ${{ matrix.linux_source }}
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+              echo "ENFS_LINUX_SOURCE_TREE=" >> "$GITHUB_ENV"
+          else
+              fallback="${{ matrix.apt_source_fallback }}"
+              if [ -z "$fallback" ]; then
+                  echo "::error::${{ matrix.linux_source }} install failed (rc=$rc), no fallback for ${{ matrix.target }}"
+                  exit 1
+              fi
+              sudo sed -i 's|^Types: deb$|Types: deb deb-src|' \
+                  /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+              sudo sed -i 's|^# deb-src|deb-src|' /etc/apt/sources.list 2>/dev/null || true
+              sudo apt-get update
+              mkdir -p /tmp/kernel-src && cd /tmp/kernel-src
+              apt-get source "$fallback"
+              tree=$(find . -maxdepth 1 -type d ! -name . | head -1)
+              [ -d "$tree" ] || { echo "::error::apt source $fallback produced no directory"; exit 1; }
+              echo "ENFS_LINUX_SOURCE_TREE=$(realpath "$tree")" >> "$GITHUB_ENV"
+          fi
 
       - name: Cache fetched Ubuntu kernel source
         uses: actions/cache@v4
@@ -201,6 +270,54 @@ jobs:
           dpkg-buildpackage -us -uc -b
           ls -lh ../enfs-dkms_*.deb
 
+      - name: Stage kernel source for the runner's actual kernel
+        run: |
+          # The arm64 runner image typically runs a different kernel
+          # (e.g. 6.14.0-azure) than the matrix-target we built for.
+          # The DKMS install we're about to do will run PRE_BUILD for
+          # uname -r, which calls fetch-vendor-ubuntu.sh; that needs
+          # source for THIS runner's kernel, not the matrix one.
+          set -e
+          KVER=$(uname -r)
+          echo "Runner kernel: $KVER"
+          case "$KVER" in
+              6.14.*)
+                  pkg=linux-source-6.14.0
+                  src_pkg=linux-hwe-6.14
+                  ;;
+              6.8.*)
+                  pkg=linux-source-6.8.0
+                  src_pkg=linux
+                  ;;
+              7.0.*)
+                  pkg=linux-source-7.0.0
+                  src_pkg=linux
+                  ;;
+              *)
+                  echo "::warning::Unknown runner kernel $KVER — install-verify may fail"
+                  exit 0
+                  ;;
+          esac
+          # Try the binary deb first.
+          if sudo apt-get install -y "$pkg"; then
+              echo "binary $pkg installed at /usr/src/${pkg}.tar.bz2"
+              ls -la "/usr/src/${pkg}.tar."* || true
+          else
+              # Fall back to apt source + stage as /usr/src/<pkg>/ so
+              # the fetcher's dir-layout path picks it up.
+              sudo sed -i 's|^Types: deb$|Types: deb deb-src|' \
+                  /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+              sudo apt-get update
+              mkdir -p /tmp/runner-src && cd /tmp/runner-src
+              apt-get source "$src_pkg"
+              tree=$(find . -maxdepth 1 -type d ! -name . | head -1)
+              [ -d "$tree" ] || { echo "::error::apt source $src_pkg failed"; exit 1; }
+              sudo mkdir -p /usr/src
+              sudo ln -sf "$(realpath "$tree")" "/usr/src/$pkg"
+              echo "staged extracted source at /usr/src/$pkg → $tree"
+              ls -la "/usr/src/$pkg"
+          fi
+
       - name: dpkg install of the .deb (validates postinst on arm64)
         run: |
           # The .deb is Architecture: all so the same artefact already
@@ -213,21 +330,20 @@ jobs:
 
   # The .deb itself doesn't need a kernel build — it's the DKMS source
   # tarball + control files. dpkg-buildpackage runs lintian afterwards.
+  #
+  # As of #16 the .deb no longer bundles vendor/ubuntu-X.Y/ kernel
+  # source — those are fetched from the user's /usr/src/linux-source-*
+  # at install time by the DKMS PRE_BUILD hook. So this job no longer
+  # needs any linux-source-* package, and no kernel-source cache.
   build-deb:
     name: build .deb
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
-      - name: Install dpkg-dev + lintian + dh-dkms + devscripts
+      - name: Install dpkg-dev + lintian + dh-dkms
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential dpkg-dev debhelper dh-dkms dkms lintian devscripts pandoc
-
-      - name: Cache fetched Ubuntu kernel source (one cache covers all 3 targets)
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/enfs-vendor
-          key: enfs-vendor-allthree-${{ hashFiles('vendor/ubuntu-*/UPSTREAM-REVISION') }}
+          sudo apt-get install -y build-essential dpkg-dev debhelper dh-dkms dkms lintian pandoc
       - name: Build the .deb
         run: dpkg-buildpackage -us -uc -b
       - name: Collect .deb into workspace (upload-artifact disallows ..)

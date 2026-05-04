@@ -36,7 +36,12 @@ Run as `root` or with `sudo`.
 
 ```bash
 # 1. Build deps
-apt update && apt install -y dkms build-essential linux-headers-generic nfs-common
+#    `linux-source` ships the kernel tarball under /usr/src/ that DKMS
+#    needs to rebuild the patched modules at install time (see #16).
+#    On HWE kernels (e.g. 6.14 on 24.04) you may need
+#    `linux-source-6.14.0` explicitly in addition.
+apt update && apt install -y \
+    dkms build-essential linux-headers-generic linux-source nfs-common
 
 # 2. Install the package (substitute the actual file you downloaded)
 dpkg -i enfs-dkms_0.1.0-1_amd64.deb

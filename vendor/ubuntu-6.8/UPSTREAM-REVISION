@@ -1,11 +1,12 @@
 # Pin for `scripts/fetch-vendor-ubuntu.sh ubuntu-6.8`.
-# The fetch script sources this file as shell, downloads the named
-# Ubuntu kernel source package from ARCHIVE_URL, dpkg-source -x's it,
-# and copies the paths in MANIFEST into this directory.
+#
+# The fetch script reads LINUX_SOURCE_PKG, locates
+# /usr/src/${LINUX_SOURCE_PKG}.tar.{bz2,xz,gz} (provided by the
+# matching apt package), extracts it to a cache, and copies the
+# paths in MANIFEST into this directory.
 #
 # Source: Ubuntu 24.04 LTS GA kernel.
+# Install with:  sudo apt install linux-source-6.8.0
 
-SRC_PKG=linux
-SRC_VERSION=6.8.0-111.111
-ARCHIVE_URL=http://archive.ubuntu.com/ubuntu/pool/main/l/linux
-VENDORED=2026-05-01
+LINUX_SOURCE_PKG=linux-source-6.8.0
+VENDORED=2026-05-04

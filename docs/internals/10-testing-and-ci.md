@@ -183,56 +183,99 @@ load arbitrary kernel modules (their running kernel is GitHub's;
 ours is foreign). Build coverage is full; on-target *load* coverage
 is not. The `enfs-dev-24-arm64` test VM (§10.7) fills the gap.
 
-## 10.4 Lazy vendor fetch
+## 10.4 Vendor materialisation from `linux-source-*` packages
 
 `vendor/ubuntu-{6.8,6.14,7.0}/` is *not* committed verbatim. Each
 target directory carries only `UPSTREAM-REVISION` (a shell-sourceable
-pin file: `SRC_PKG`, `SRC_VERSION`, `ARCHIVE_URL`) and `MANIFEST`
-(a list of paths to copy). The actual stock kernel source files are
-fetched on demand by [`scripts/fetch-vendor-ubuntu.sh`](../../scripts/fetch-vendor-ubuntu.sh).
+pin file: `LINUX_SOURCE_PKG`) and `MANIFEST` (a list of paths to
+copy). The actual stock kernel source files are materialised on
+demand by [`scripts/fetch-vendor-ubuntu.sh`](../../scripts/fetch-vendor-ubuntu.sh)
+from the `linux-source-X.Y.Z` apt package installed on the build
+host.
+
+> **Changed in #16 (2026-05):** previously this script `dget`'d the
+> source package from `archive.ubuntu.com`. That made offline builds
+> impossible and required all three `linux-source` packages to be
+> reachable on a single distro (which they aren't). The script now
+> reads from `/usr/src/${LINUX_SOURCE_PKG}.tar.{bz2,xz,gz}` only;
+> no internet access is involved.
 
 The fetch script:
 
-1. Reads the pin file. Errors out if `SRC_PKG`, `SRC_VERSION`, or
-   `ARCHIVE_URL` is unset.
-2. Computes a cache key `${SRC_PKG}_${SRC_VERSION}` and looks under
-   `$ENFS_VENDOR_CACHE` (default `~/.cache/enfs-vendor/`).
-3. If `vendor/$TARGET/.pin-stamp` matches the wanted stamp *and* a
-   spot-check MANIFEST entry exists on disk, exits early — the tree
-   is already materialised.
-4. Otherwise, runs `dget -d -u "$DSC_URL"` (from `devscripts`) to
-   download the source package, then `dpkg-source -x` to extract it
-   into the cache.
+1. Reads `LINUX_SOURCE_PKG` from the pin file. Errors out (with a
+   migration hint) if it sees the legacy `SRC_PKG`/`ARCHIVE_URL`
+   fields.
+2. Locates `/usr/src/${LINUX_SOURCE_PKG}.tar.{bz2,xz,gz}`. If
+   missing, errors with `apt install ${LINUX_SOURCE_PKG}` hint and
+   exits non-zero.
+3. Computes a cache key from the tarball SHA. If
+   `vendor/$TARGET/.pin-stamp` matches the wanted stamp *and* a
+   spot-check MANIFEST entry exists on disk, exits early.
+4. Extracts the tarball into `$ENFS_VENDOR_CACHE` (default
+   `~/.cache/enfs-vendor/`) — idempotent per-tarball-SHA.
 5. Walks the MANIFEST and copies each entry into a sibling
    `vendor/$TARGET.fetching.$$/` directory.
-6. Atomically renames the sibling over `vendor/$TARGET/`. A
-   half-finished run never leaves the repo in a broken state.
+6. Atomically renames the sibling over `vendor/$TARGET/`.
 7. Stamps the pin into `vendor/$TARGET/.pin-stamp`.
+
+### When the materialisation runs
+
+There are two callers:
+
+- **Developer workstation:** `make port` calls the fetcher for the
+  target matching the developer's running kernel. Devs install
+  `linux-source-X.Y.Z` for the target they're working on.
+
+- **End-user .deb install (the load-bearing one):** As of #16 the
+  `.deb` does **not** bundle `vendor/ubuntu-X.Y/` kernel trees.
+  Instead the DKMS PRE_BUILD hook on the user's machine
+  ([`scripts/dkms-pre-build.sh`](../../scripts/dkms-pre-build.sh))
+  invokes the fetcher for the user's kernel target, which uses
+  whichever `linux-source-X.Y.Z` package is installed there. The
+  `.deb` `Depends: linux-source` so a sane default is pulled in
+  automatically.
+
+### HWE-kernel workaround (no binary `linux-source-*.tar.bz2`)
+
+Ubuntu's `linux-hwe-X.Y` source packages **don't** produce a
+`linux-source-X.Y.Z` binary deb (verified for `linux-hwe-6.14` on
+24.04 noble — only `-headers`, `-tools`, `-cloud-tools` are built).
+For HWE targets the workflow is:
+
+```bash
+# Enable deb-src (modern apt: deb822-format .sources file)
+sudo sed -i 's|^Types: deb$|Types: deb deb-src|' \
+    /etc/apt/sources.list.d/ubuntu.sources
+sudo apt-get update
+
+# Download + extract the HWE source via apt source
+mkdir -p /tmp/hwe-src && cd /tmp/hwe-src
+apt-get source linux-hwe-6.14
+
+# Point the fetcher at the extracted tree
+export ENFS_LINUX_SOURCE_TREE="$(realpath linux-hwe-*)"
+make port TARGET=ubuntu-6.14
+```
+
+The `ENFS_LINUX_SOURCE_TREE` environment variable bypasses the
+`/usr/src/<pkg>.tar.*` lookup and uses the supplied directory
+directly. Set it (empty string) to fall back to the GA path. The
+CI workflow ([`build.yml`](../../.github/workflows/build.yml))
+implements this fallback automatically: it tries the binary
+package first and falls back to `apt source` if missing.
+
+This split solves the impossible-cross-distro requirement: the .deb
+build host doesn't need any kernel source at all, and the user's
+machine only needs source matching its own kernel.
 
 Refer to [chapter 8](./08-patch-series.md) for the patch-application
 step that runs *after* fetch, inside `make port`.
 
-The cache strategy is the load-bearing detail for CI: every build
-job in `build.yml` and `release.yml` mounts
-`~/.cache/enfs-vendor` as an `actions/cache@v4` step keyed by the
-hash of the relevant `UPSTREAM-REVISION` file(s). First build of a
-new pin downloads and extracts (~30 s); subsequent builds are
-no-ops on the network and just copy from the cache. Cache key
-example:
-
-```yaml
-key: enfs-vendor-${{ matrix.target }}-${{ hashFiles(format('vendor/{0}/UPSTREAM-REVISION', matrix.target)) }}
-```
-
-For the `build-deb` and `release` jobs, which need all three
-targets, a single combined cache covers all of them:
-
-```yaml
-key: enfs-vendor-allthree-${{ hashFiles('vendor/ubuntu-*/UPSTREAM-REVISION') }}
-```
-
-When you bump a pin, the cache key changes, the next build pays the
-fetch cost once, and every build after that hits the cache.
+The cache strategy still applies: every build job in `build.yml`
+and `release.yml` mounts `~/.cache/enfs-vendor` as an
+`actions/cache@v4` step keyed by the hash of the relevant
+`UPSTREAM-REVISION` file(s). First build of a new pin extracts
+(~10–30 s); subsequent builds copy from the cache.
 
 ## 10.5 Branch + PR flow
 
