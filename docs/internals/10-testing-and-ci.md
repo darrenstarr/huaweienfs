@@ -386,6 +386,7 @@ A short audit of the testing surface as of writing:
 | Does shell pass shellcheck? | Yes | `lint.yml :: shellcheck` |
 | Does Markdown pass markdownlint? | Yes | `lint.yml :: markdownlint` |
 | Does Makefile parse? | Yes | `lint.yml :: make-help` |
+| Do userspace unit tests pass? | Yes | `test.yml :: userspace-unit-tests` (§10.11) |
 
 Pending, in rough priority order:
 
@@ -405,3 +406,112 @@ deliberate and growing, but it is not a substitute for a real
 multi-host smoke test before each release. Treat the green badge as
 "the thing built"; treat `enfs-dev` walking through §10.9 as "the
 thing works."
+
+## 10.11 Userspace unit tests (`tests/`, `make test`)
+
+Started 2026-05-04. The C logic in
+`vendor/openeuler/fs/nfs/enfs/*.c` is exercised in **userspace**
+under [libcheck](https://libcheck.github.io/check/) — no kernel
+build, no VM, no root. This complements the existing
+[`enfs_test.c`](../../src/fs/nfs/enfs/enfs_test.c) KUnit stub
+(which covers in-kernel integration); the userspace suite covers
+pure logic where iteration speed and proper debug tools matter.
+
+### Why a userspace layer at all?
+
+- **Iteration is sub-second** instead of "sync→VM→modprobe→dmesg".
+- `gdb`, `valgrind`, `clang -fsanitize=address`, `gcov` — all just
+  work because the test binary is a normal userspace process.
+- Acts as a **behavioral baseline** that any future port (a Rust
+  rewrite, a refactor of the selection algorithm) must reproduce.
+
+### Architecture
+
+```
+tests/
+├── kernel-shim/linux/        userspace fakes for kernel headers
+├── kernel-shim/enfs_preempt.h force-included; preempts include
+│                              guards for enfs internal headers
+├── stubs/                    fakes for enfs-internal callees
+├── unit/test_<module>.c      Check suites — one per source-under-test
+├── fetch-linux-headers.sh    fetches upstream sunrpc headers
+├── LINUX-HEADERS-MANIFEST    list of upstream files to fetch
+├── UPSTREAM-REVISION         pinned Linux tag (default v6.14)
+└── build/                    gitignored; cached headers + binaries
+```
+
+Two key tricks make this work:
+
+1. **Kernel-API shim.** `tests/kernel-shim/linux/*.h` provides
+   userspace fakes (`spinlock_t` → `pthread_mutex_t`, RCU → no-op,
+   `kmalloc` → `malloc`, `list_head` → standard intrusive impl).
+   The build prepends `-I tests/kernel-shim` so source files
+   compile unmodified — no `#ifdef ENFS_USERSPACE_TESTS` markers.
+
+2. **Include-guard preemption.** `enfs_preempt.h` is
+   force-included (`-include`) and `#define`s the include guards
+   for `enfs.h`, `enfs_config.h`, `linux/nfs_fs_sb.h`, and friends.
+   When the source then `#include`s them, the guard fires and
+   their content is skipped. We provide minimal substitutes for
+   the symbols the source actually uses (~10 functions, ~3 structs).
+   Avoids dragging in the entire NFS world (40+ transitive headers).
+
+### Adding a test for a new enfs source file
+
+1. Add fakes for that file's enfs-internal callees (with global
+   control variables) in `tests/stubs/enfs_deps_stubs.c`.
+2. Make sure `tests/kernel-shim/linux/` covers all kernel headers
+   it `#include`s; add minimal shims as needed.
+3. Write `tests/unit/test_<module>.c` as a Check suite.
+4. In `tests/Makefile`, append the test name to `TESTS` and define
+   `ENFS_SRC_<name>` and `STUBS_<name>`.
+5. `make test`.
+
+### CI
+
+[`.github/workflows/test.yml`](../../.github/workflows/test.yml)
+runs `make test` on `ubuntu-24.04` for every push and PR. The
+upstream-headers fetch is cached on the `tests/UPSTREAM-REVISION`
+hash, so subsequent runs are sub-second after the first.
+
+This workflow is **independent** of `build.yml` — a broken kernel
+build doesn't mask a test failure, and vice versa.
+
+### Coverage status
+
+`enfs_roundrobin.c` (~355 LOC, 22 functions) — **44 tests across 4
+test cases**, with `make coverage` reporting:
+
+| Metric | Coverage |
+|---|---|
+| Lines | 100.0% (153 / 153) |
+| Functions | 100.0% (22 / 22) |
+| Branches | 99.0% (99 / 100) |
+
+The one uncovered branch direction is provably unreachable by
+analysis (a monotonicity argument on the running minimum) and is
+documented in `tests/unit/test_enfs_roundrobin.c` next to where
+the corresponding test would land if the apparent production-code
+bug is ever fixed.
+
+`make coverage` produces an interactive HTML report at
+`tests/build/coverage/index.html`. lcov 2.0+ required (apt:
+`lcov`).
+
+Phase 2 will extend coverage to `failover_path.c`, `pm_state.c`,
+`enfs_multipath_parse.c`, and `dns_process.c`.
+
+### Limitations
+
+- **Single-threaded.** The shim's RCU and `smp_*` macros are
+  no-ops. Concurrency tests would need a different approach
+  (KUnit, or threaded tests with real pthreads — not currently
+  scaffolded).
+- **No real network.** Anything that calls into actual sunrpc
+  transports cannot be unit-tested here. Use the smoke tests
+  (§10.9) for that.
+- **Shim drift.** If upstream Linux changes a struct field, the
+  minimal shim doesn't notice; production module breaks at build
+  time. Defense: append the affected header to
+  `LINUX-HEADERS-MANIFEST` so the real layout gets used once a
+  test depends on layout fidelity.
