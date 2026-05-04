@@ -1,0 +1,14 @@
+# Pin for tests/fetch-linux-headers.sh.
+#
+# This file is sourced by the fetcher as shell. It must set:
+#   LINUX_TAG    a git tag in the torvalds/linux mirror (e.g. v6.14, v6.8)
+#   FETCH_BASE   raw URL prefix; the script appends each MANIFEST line
+#
+# Default tag matches the project's Ubuntu 6.14 HWE target — that's
+# the kernel actually loaded on enfs-dev-24 (per CLAUDE.md). Bumping
+# this is fine as long as the structs we depend on are still there;
+# the test build will fail loudly if a referenced field has moved.
+
+LINUX_TAG=v6.14
+FETCH_BASE=https://raw.githubusercontent.com/torvalds/linux/${LINUX_TAG}
+VENDORED=2026-05-04

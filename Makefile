@@ -59,6 +59,10 @@ help:
 	@echo
 	@echo "  make deb               Build the enfs-dkms .deb package (debian/)"
 	@echo
+	@echo "  make test              Userspace unit tests (no kernel build, no VM)"
+	@echo "                         Requires: apt install check libsubunit-dev pkg-config"
+	@echo "  make test-clean        Remove tests/build/ artefacts"
+	@echo
 	@echo "  make sync-vm           rsync src/ + vendor/ + scripts/ to $(VM_HOST):$(VM_PATH)"
 	@echo "  make build-on-vm       ssh into VM and run 'make modules'"
 	@echo "  make smoke-on-vm       ssh into VM, dkms-install, modprobe enfs, dmesg tail"
@@ -87,6 +91,14 @@ port: fetch-vendor
 .PHONY: modules
 modules: port
 	$(MAKE) -C $(KDIR) M=$(SRC_DIR) modules
+
+.PHONY: test
+test:
+	$(MAKE) -C tests check
+
+.PHONY: test-clean
+test-clean:
+	$(MAKE) -C tests clean
 
 .PHONY: manpage
 manpage: docs/man/enfs.7
