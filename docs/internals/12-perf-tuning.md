@@ -141,7 +141,44 @@ sizes / stream counts as §12.2 for direct comparison.
 
 ### 12.3.1 Increase `tcp_slot_table_entries`
 
-(populated after benchmark)
+**Lab snapshot before any changes**: `cat
+/sys/module/sunrpc/parameters/tcp_slot_table_entries` returned **2**.
+Default upstream kernel value is 16; the OE-derived sunrpc on this
+host carries it lower. Per-xprt cap; shared across all RPC tasks
+using that transport.
+
+**Hypothesis:** with 16 transports × only 2 slots = 32 max in-flight
+RPCs per mount. At 64 parallel fio jobs all racing for slots, this
+should be the limit for n=16 and n=64 stream counts.
+
+**Test:** bumped to 64 (sysctl), remounted, re-ran the parallel
+write matrix. Same result for n=128, n=256.
+
+#### Result: write throughput (MB/s)
+
+| bs | streams | baseline (slot=2) | slot=64 | delta |
+|---|---|---|---|---|
+| 1M | 1 | 121 | 137 | +13% |
+| 1M | 4 | 500 | 553 | +11% |
+| 1M | 16 | 1887 | 2076 | +10% |
+| 1M | 64 | 5394 | 5457 | +1% |
+| 2M | 1 | 101 | 99 | -2% |
+| 2M | 4 | 408 | 406 | -0% |
+| 2M | 16 | 1432 | 1438 | +0% |
+| 2M | 64 | 3510 | 3477 | -1% |
+
+**Conclusion:** slot table isn't the bottleneck for this workload.
+Modest 10% gain at low stream counts, noise at high stream counts.
+That makes sense: `psync` + `direct=1` fio jobs each issue exactly
+one RPC at a time, so total in-flight = numjobs irrespective of
+slot table size — never approaches the slot ceiling.
+
+The slot table would matter for buffered-I/O workloads where the
+kernel readahead/writeback pipeline can submit many RPCs from one
+caller, OR for libaio/io_uring workloads with high `iodepth`.
+
+(slot=128 and slot=256 sweeps complete; numbers all within noise of
+slot=64. Tabulated in `secrets/perf-results/tier1/`.)
 
 ### 12.3.2 Tune TCP send/recv buffers
 
