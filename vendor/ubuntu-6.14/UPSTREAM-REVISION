@@ -1,11 +1,15 @@
 # Pin for `scripts/fetch-vendor-ubuntu.sh ubuntu-6.14`.
-# The fetch script sources this file as shell, downloads the named
-# Ubuntu kernel source package from ARCHIVE_URL, dpkg-source -x's it,
-# and copies the paths in MANIFEST into this directory.
 #
-# Source: Ubuntu 24.04 LTS HWE (6.14) kernel.
+# The fetch script reads LINUX_SOURCE_PKG, locates
+# /usr/src/${LINUX_SOURCE_PKG}.tar.{bz2,xz,gz} (provided by the
+# matching apt package), extracts it to a cache, and copies the
+# paths in MANIFEST into this directory.
+#
+# Source: Ubuntu 24.04 LTS HWE kernel (6.14).
+# Install with:  sudo apt install linux-source-6.14.0
+# (HWE source — usually pulled in via linux-hwe-6.14-source on 24.04;
+#  the binary that ships /usr/src/linux-source-6.14.0.tar.* is named
+#  linux-source-6.14.0 on both 24.04-with-HWE and 24.10/25.04.)
 
-SRC_PKG=linux-hwe-6.14
-SRC_VERSION=6.14.0-37.37~24.04.1
-ARCHIVE_URL=http://archive.ubuntu.com/ubuntu/pool/main/l/linux-hwe-6.14
-VENDORED=2026-05-02
+LINUX_SOURCE_PKG=linux-source-6.14.0
+VENDORED=2026-05-04

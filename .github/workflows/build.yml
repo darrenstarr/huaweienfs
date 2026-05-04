@@ -25,19 +25,24 @@ jobs:
           - target: ubuntu-6.8
             kver-prefix: "6.8.0"
             headers: "linux-headers-generic"
+            linux_source: "linux-source-6.8.0"
           - target: ubuntu-6.14
             kver-prefix: "6.14.0"
             headers: "linux-headers-6.14.0-37-generic"
+            linux_source: "linux-source-6.14.0"
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install build deps + matching kernel headers
+      - name: Install build deps + matching kernel headers + source
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc kmod cpio flex bison \
-              libssl-dev libelf-dev zstd dwarves \
-              devscripts dpkg-dev
+              libssl-dev libelf-dev zstd dwarves bzip2
           sudo apt-get install -y ${{ matrix.headers }}
+          # #16: vendor materialisation now reads the linux-source-X.Y.Z
+          # tarball from /usr/src/, not the internet. Install the matching
+          # package here.
+          sudo apt-get install -y ${{ matrix.linux_source }}
 
       - name: Cache fetched Ubuntu kernel source
         uses: actions/cache@v4
@@ -84,13 +89,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install build deps + 7.0 headers
+      - name: Install build deps + 7.0 headers + source
         run: |
           apt-get update
           apt-get install -y build-essential bc kmod cpio flex bison \
-              libssl-dev libelf-dev zstd dwarves make \
-              devscripts dpkg-dev \
+              libssl-dev libelf-dev zstd dwarves make bzip2 \
               linux-headers-generic
+          # #16: vendor materialisation reads /usr/src/linux-source-7.0.0.tar.*
+          apt-get install -y linux-source-7.0.0
 
       - name: Cache fetched Ubuntu kernel source
         uses: actions/cache@v4
@@ -145,19 +151,23 @@ jobs:
           - target: ubuntu-6.8
             kver-prefix: "6.8.0"
             headers: "linux-headers-generic"
+            linux_source: "linux-source-6.8.0"
           - target: ubuntu-6.14
             kver-prefix: "6.14.0"
             headers: "linux-headers-6.14.0-37-generic"
+            linux_source: "linux-source-6.14.0"
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install build deps + matching kernel headers
+      - name: Install build deps + matching kernel headers + source
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc kmod cpio flex bison \
-              libssl-dev libelf-dev zstd dwarves file \
-              devscripts dpkg-dev
+              libssl-dev libelf-dev zstd dwarves file bzip2
           sudo apt-get install -y ${{ matrix.headers }}
+          # #16: vendor materialisation reads /usr/src/linux-source-X.Y.Z
+          # — install the matching package.
+          sudo apt-get install -y ${{ matrix.linux_source }}
 
       - name: Cache fetched Ubuntu kernel source
         uses: actions/cache@v4
@@ -213,21 +223,20 @@ jobs:
 
   # The .deb itself doesn't need a kernel build — it's the DKMS source
   # tarball + control files. dpkg-buildpackage runs lintian afterwards.
+  #
+  # As of #16 the .deb no longer bundles vendor/ubuntu-X.Y/ kernel
+  # source — those are fetched from the user's /usr/src/linux-source-*
+  # at install time by the DKMS PRE_BUILD hook. So this job no longer
+  # needs any linux-source-* package, and no kernel-source cache.
   build-deb:
     name: build .deb
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
-      - name: Install dpkg-dev + lintian + dh-dkms + devscripts
+      - name: Install dpkg-dev + lintian + dh-dkms
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential dpkg-dev debhelper dh-dkms dkms lintian devscripts pandoc
-
-      - name: Cache fetched Ubuntu kernel source (one cache covers all 3 targets)
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/enfs-vendor
-          key: enfs-vendor-allthree-${{ hashFiles('vendor/ubuntu-*/UPSTREAM-REVISION') }}
+          sudo apt-get install -y build-essential dpkg-dev debhelper dh-dkms dkms lintian pandoc
       - name: Build the .deb
         run: dpkg-buildpackage -us -uc -b
       - name: Collect .deb into workspace (upload-artifact disallows ..)

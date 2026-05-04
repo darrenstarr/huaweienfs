@@ -20,16 +20,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install dpkg-dev + lintian + dh-dkms + devscripts
+      - name: Install dpkg-dev + lintian + dh-dkms
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential dpkg-dev debhelper dh-dkms dkms lintian devscripts pandoc
+          sudo apt-get install -y build-essential dpkg-dev debhelper dh-dkms dkms lintian pandoc
 
-      - name: Cache fetched Ubuntu kernel source (one cache covers all 3 targets)
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/enfs-vendor
-          key: enfs-vendor-allthree-${{ hashFiles('vendor/ubuntu-*/UPSTREAM-REVISION') }}
+      # As of #16 the .deb no longer bundles vendor/ubuntu-X.Y/ kernel
+      # source; it's fetched from the user's /usr/src/linux-source-*
+      # at install time. So the release build no longer needs any
+      # linux-source-* package or the per-target vendor cache.
 
       - name: Build the .deb
         run: dpkg-buildpackage -us -uc -b
@@ -67,12 +66,20 @@ jobs:
 
             The .deb is `Architecture: all` — DKMS does the per-kernel,
             per-arch compile on the user's machine using their installed
-            `linux-headers-*`. One .deb works on amd64 *and* arm64.
+            `linux-headers-*` and `linux-source-*`. One .deb works on
+            amd64 *and* arm64.
+
+            As of #16 the package no longer bundles ~30 MB of stock
+            kernel source; it `Depends: linux-source` and pulls the
+            tarball at install time. Build is fully offline-capable
+            once the source package is cached locally.
 
             ## Install
 
             ```bash
             sudo apt install ./enfs-dkms_*_all.deb
+            # On HWE kernels (e.g. 6.14 on 24.04) you may also need:
+            #   sudo apt install linux-source-6.14.0
             sudo reboot                # required so DKMS modules load at boot
             sudo modprobe enfs
             ```

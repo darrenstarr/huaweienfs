@@ -14,7 +14,9 @@ Depends:
  ${misc:Depends},
  dkms (>= 2.8),
  build-essential,
- linux-headers-generic | linux-headers
+ linux-headers-generic | linux-headers,
+ linux-source,
+ bzip2
 Recommends: nfs-common
 Description: Enhanced NFS multipath client (DKMS source) for Ubuntu 24.04 / 26.04
  enfs is the OpenEuler "Enhanced NFS" client, providing multipath mounts,

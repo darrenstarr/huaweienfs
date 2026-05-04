@@ -40,10 +40,6 @@ PATCHES_DIR="$PWD/patches/$TARGET"
 COMPAT_DIR="$PWD/compat"
 SRC_DIR="$PWD/src"
 
-if [[ ! -d "$UBUNTU_VENDOR_DIR" ]]; then
-    echo "[dkms-pre-build] ERROR: vendor dir $UBUNTU_VENDOR_DIR missing for kernel $KVER" >&2
-    exit 1
-fi
 if [[ ! -d "$PATCHES_DIR" ]]; then
     echo "[dkms-pre-build] ERROR: patches dir $PATCHES_DIR missing for kernel $KVER" >&2
     exit 1
@@ -52,8 +48,25 @@ if [[ ! -x scripts/build-src-tree.sh ]]; then
     echo "[dkms-pre-build] ERROR: missing scripts/build-src-tree.sh in $PWD" >&2
     exit 1
 fi
+if [[ ! -x scripts/fetch-vendor-ubuntu.sh ]]; then
+    echo "[dkms-pre-build] ERROR: missing scripts/fetch-vendor-ubuntu.sh in $PWD" >&2
+    exit 1
+fi
 
+# As of #16 the .deb no longer bundles the vendor kernel source.
+# Materialise it here from the linux-source-X.Y.Z apt package on the
+# user's machine. The fetcher errors with a clear "apt install ..."
+# hint if the package isn't present.
 echo "[dkms-pre-build] target=$TARGET kernel=$KVER"
+echo "[dkms-pre-build] fetching vendor/$TARGET from local linux-source pkg"
+scripts/fetch-vendor-ubuntu.sh "$TARGET"
+
+if [[ ! -d "$UBUNTU_VENDOR_DIR" ]]; then
+    # Should be unreachable — the fetcher would have errored first.
+    echo "[dkms-pre-build] ERROR: vendor dir $UBUNTU_VENDOR_DIR still missing after fetch" >&2
+    exit 1
+fi
+
 scripts/build-src-tree.sh \
     "$UBUNTU_VENDOR_DIR" \
     "$OE_VENDOR_DIR" \
