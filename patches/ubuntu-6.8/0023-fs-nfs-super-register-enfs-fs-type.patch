@@ -1,0 +1,61 @@
+From: enfs-dkms
+Subject: [PATCH] fs/nfs/super.c: register/unregister enfs_fs_type (#20)
+
+Wires the new "enfs" filesystem type (defined in fs_context.c, see
+the previous patch) into nfs.ko's init/exit lifecycle.
+
+Three additive hunks (all gated on CONFIG_ENFS):
+
+  1. register_nfs_fs(): after register_filesystem(&nfs_fs_type)
+     succeeds, also register_filesystem(&enfs_fs_type). On failure,
+     goto error_enfs (which unregisters nothing — enfs registration
+     itself failed — and falls through to unregister nfs_fs_type).
+
+  2. error_1: unregister enfs_fs_type before falling through to
+     error_enfs: → unregister nfs_fs_type. The new error_enfs label
+     is only reached from the enfs failure path (skips the enfs
+     unregister) or via fall-through from error_1.
+
+  3. unregister_nfs_fs(): unregister_filesystem(&enfs_fs_type)
+     before nfs_fs_type, mirror order of registration.
+
+Issue: #20
+
+---
+--- a/fs/nfs/super.c
++++ b/fs/nfs/super.c
+@@ -146,6 +146,14 @@
+ 	if (ret < 0)
+ 		goto error_0;
+
++#if IS_ENABLED(CONFIG_ENFS)
++	/* Register the explicit "enfs" filesystem type alongside "nfs"
++	 * (see #20). Lets operators write `mount -t enfs ...`. */
++	ret = register_filesystem(&enfs_fs_type);
++	if (ret < 0)
++		goto error_enfs;
++#endif
++
+ 	ret = register_nfs4_fs();
+ 	if (ret < 0)
+ 		goto error_1;
+@@ -174,6 +182,10 @@
+ error_2:
+ 	unregister_nfs4_fs();
+ error_1:
++#if IS_ENABLED(CONFIG_ENFS)
++	unregister_filesystem(&enfs_fs_type);
++error_enfs:
++#endif
+ 	unregister_filesystem(&nfs_fs_type);
+ error_0:
+ 	return ret;
+@@ -190,6 +202,9 @@
+ #ifdef CONFIG_NFS_V4_2
+ 	nfs_ssc_unregister_ops();
+ #endif
++#if IS_ENABLED(CONFIG_ENFS)
++	unregister_filesystem(&enfs_fs_type);
++#endif
+ 	unregister_filesystem(&nfs_fs_type);
+ }

@@ -51,7 +51,7 @@ reboot
 
 # 5. (after reboot) Mount your storage with multipath
 mkdir -p /mnt/storage
-mount -t nfs \
+mount -t enfs \
       -o vers=3,nolock,remoteaddrs=10.0.0.10~10.0.0.11~10.0.0.12 \
       10.0.0.10:/your_export /mnt/storage
 ```
@@ -59,6 +59,12 @@ mount -t nfs \
 That's it. Replace the three IPs (`10.0.0.10~11~12`) with your storage's
 front-end NFS addresses, separated by **`~`** (tilde, not comma). Replace
 `/your_export` with the export path your storage admin gave you.
+
+> **Why `-t enfs` and not `-t nfs`?** Using `enfs` as the type makes
+> multipath intent visible in `/proc/mounts` and `/etc/fstab` — anyone
+> looking at the mount table can tell at a glance that this mount uses
+> the multipath stack. `mount -t nfs -o remoteaddrs=...` also works (for
+> back-compat) but is harder to spot. See issue #20 for context.
 
 > **Why `vers=3,nolock`?** v0 of this package supports NFSv3 and disables
 > NLM file locking. v1 will lift both restrictions. If you need NFSv4 or
@@ -89,7 +95,7 @@ If the path table only lists *one* line, jump to
 Add to `/etc/fstab`:
 
 ```text
-10.0.0.10:/your_export  /mnt/storage  nfs  vers=3,nolock,remoteaddrs=10.0.0.10~10.0.0.11~10.0.0.12,_netdev  0  0
+10.0.0.10:/your_export  /mnt/storage  enfs  vers=3,nolock,remoteaddrs=10.0.0.10~10.0.0.11~10.0.0.12,_netdev  0  0
 ```
 
 The `_netdev` flag tells systemd to wait until the network is up.

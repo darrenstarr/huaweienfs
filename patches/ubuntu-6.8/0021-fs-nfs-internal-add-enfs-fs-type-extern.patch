@@ -1,0 +1,27 @@
+From: enfs-dkms
+Subject: [PATCH] fs/nfs/internal.h: extern struct file_system_type enfs_fs_type (#20)
+
+Adds the forward declaration for the new "enfs" filesystem type.
+The actual definition lives in fs_context.c (next patch).
+
+Sibling of nfs_fs_type's extern; same conditional pattern as the
+nfs4_fs_type guard (CONFIG-gated).
+
+Issue: #20
+
+---
+ fs/nfs/internal.h | 3 +++
+ 1 file changed, 3 insertions(+)
+
+--- a/fs/nfs/internal.h
++++ b/fs/nfs/internal.h
+@@ -278,6 +278,9 @@
+
+ /* fs_context.c */
+ extern struct file_system_type nfs_fs_type;
++#if IS_ENABLED(CONFIG_ENFS)
++extern struct file_system_type enfs_fs_type;
++#endif
+
+ /* pagelist.c */
+ extern int __init nfs_init_nfspagecache(void);

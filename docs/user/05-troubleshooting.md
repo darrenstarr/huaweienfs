@@ -16,7 +16,7 @@ If your problem is not listed here, gather a `dmesg | tail -200`,
 
 ## Mount succeeds but only one server gets traffic
 
-**Symptom.** `mount -t nfs -o ...,remoteaddrs=A~B ...` returns 0,
+**Symptom.** `mount -t enfs -o ...,remoteaddrs=A~B ...` returns 0,
 the mount is usable, but `tcpdump` on each NFS server shows that
 **only one** of the two is receiving any packets.
 
@@ -60,7 +60,7 @@ lsmod | grep -E '^(nfsd|sunrpc) '
 sudo umount <MOUNT_POINT>
 # Make sure sunrpc unloads cleanly before remounting
 sudo modprobe -r nfsv3 nfs lockd nfs_acl sunrpc
-sudo mount -t nfs -o vers=3,nolock,remoteaddrs=<NFS_SERVER_1>~<NFS_SERVER_2> \
+sudo mount -t enfs -o vers=3,nolock,remoteaddrs=<NFS_SERVER_1>~<NFS_SERVER_2> \
     <NFS_SERVER_1>:/<EXPORT> <MOUNT_POINT>
 ```
 
@@ -172,7 +172,7 @@ Full procedure is in [02-installation.md](02-installation.md) under
 ```bash
 lsmod | grep nfsd     # empty
 lsmod | grep sunrpc   # empty until you mount
-sudo mount -t nfs -o vers=3,nolock,remoteaddrs=<NFS_SERVER_1>~<NFS_SERVER_2> \
+sudo mount -t enfs -o vers=3,nolock,remoteaddrs=<NFS_SERVER_1>~<NFS_SERVER_2> \
     <NFS_SERVER_1>:/<EXPORT> <MOUNT_POINT>
 lsmod | grep -E '^(enfs|nfs|sunrpc) '   # all loaded from updates/dkms/
 ```
@@ -262,7 +262,7 @@ grep -r 'blacklist.*\(sunrpc\|nfs\|nfs_acl\|lockd\|nfsv3\|enfs\)' \
 # Drop everything and remount:
 sudo umount <MOUNT_POINT>
 sudo modprobe -r nfsv3 nfs lockd nfs_acl sunrpc enfs 2>/dev/null
-sudo mount -t nfs -o vers=3,nolock,remoteaddrs=<NFS_SERVER_1>~<NFS_SERVER_2> \
+sudo mount -t enfs -o vers=3,nolock,remoteaddrs=<NFS_SERVER_1>~<NFS_SERVER_2> \
     <NFS_SERVER_1>:/<EXPORT> <MOUNT_POINT>
 ```
 
