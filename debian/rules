@@ -77,6 +77,12 @@ override_dh_auto_install:
 	cp -a vendor patches compat scripts Kbuild Makefile \
 	      README.md LICENSE docs $(DKMS_SRC)/
 
+override_dh_auto_test:
+	# The userspace unit tests (`make test`) need libcheck and are
+	# run as a separate CI workflow (.github/workflows/test.yml).
+	# Don't run them during dh_auto_test — the .deb build env
+	# doesn't have libcheck installed and shouldn't need it.
+
 override_dh_auto_clean:
 	rm -f dkms.conf debian/enfs-dkms.dkms
 	rm -rf $(CURDIR)/src/.build-stamp

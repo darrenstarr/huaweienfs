@@ -81,6 +81,64 @@ recipe for proving load actually spreads.
 
 ---
 
+## Mount succeeds, all paths show CONNECTED, but throughput is ~1/N of expected
+
+**Symptom.** `cat /proc/enfs/<id>/path` shows all the transports you
+asked for as `Normal` + `CONNECTED|BOUND`. Round-robin across servers
+looks fine. But aggregate throughput is roughly what you'd expect
+from one local NIC, not N of them. tcpdump on each NIC shows that
+**outbound packets all egress through one NIC** — even though their
+source IP varies.
+
+**Cause.** Your two (or more) client storage NICs are on the **same
+IP subnet**. Linux's main routing table picks the first matching
+route per destination, regardless of source IP. The transports enfs
+created bind correctly to each source IP, but the kernel ignores
+the source binding when picking a route, so all packets exit through
+whichever NIC is listed first in the routing table.
+
+This is not enfs-specific — same NIC layout breaks multi-source
+behaviour for any application — but it matters here because that's
+exactly the high-bandwidth multipath layout this project is built
+for.
+
+**Fix.** Source-based routing: one routing table per source IP, each
+pointing at the NIC that holds that IP.
+
+```bash
+# IPv6 example — replace prefix and NIC names with yours
+sudo ip -6 route add 2001:db8:2::/64 dev <NIC_A> table 101
+sudo ip -6 route add 2001:db8:2::/64 dev <NIC_B> table 102
+sudo ip -6 rule  add from 2001:db8:2::4:1/128 lookup 101
+sudo ip -6 rule  add from 2001:db8:2::4:2/128 lookup 102
+
+# IPv4 same idea
+sudo ip -4 route add 192.0.2.0/24 dev <NIC_A> table 101
+sudo ip -4 route add 192.0.2.0/24 dev <NIC_B> table 102
+sudo ip -4 rule  add from 192.0.2.10/32 lookup 101
+sudo ip -4 rule  add from 192.0.2.11/32 lookup 102
+
+sudo umount /mnt && sudo mount -t enfs ... /mnt    # re-establish sockets
+```
+
+**Verify.**
+
+```bash
+sudo tcpdump -i <NIC_A> -c 100 'ip6 and dst port 2049' \
+    | awk '{print $3}' | sed 's/\.[0-9]*$//' | sort -u
+# Should print just the NIC's own source IP — never the other NIC's.
+```
+
+**Persist** the rules across reboots via netplan / systemd-networkd /
+NetworkManager / `iptables-restore`-style helper of your choice;
+exact mechanism depends on the distro and how the host is configured.
+
+Lab measurement: with this fix in place, a 16-stream parallel read
+went from ~40 MB/s (one NIC bottleneck) to **636 MB/s** (15.5×
+scaling on 16 transports). See issue #23.
+
+---
+
 ## "Stale file handle" right after mount
 
 **Symptom.** Mount succeeds, but the very first `ls` or `cat` against

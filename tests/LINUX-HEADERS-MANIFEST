@@ -1,0 +1,19 @@
+# Headers fetched from upstream Linux at the tag pinned in
+# UPSTREAM-REVISION. One path per line, relative to the kernel tree
+# root. Lines starting with # and blank lines are ignored.
+#
+# Currently empty: the Phase-1 POC (enfs_roundrobin) gets its struct
+# definitions from the kernel-shim layer with just the fields the
+# code under test actually touches. That's a much smaller surface
+# than dragging in real linux/sunrpc/clnt.h, which transitively pulls
+# in linux/socket.h, net/ipv6.h, asm/signal.h, linux/lwq.h and ~15
+# more headers — none of which add test value for pure-logic
+# selection algorithms.
+#
+# Future tests that need to validate against real struct layouts
+# (e.g. wire-format codec tests in exten_call.c) will add their
+# headers here. The fetcher is wired and tested; just append paths.
+#
+# Example future entries:
+#   include/linux/sunrpc/xdr.h
+#   include/uapi/linux/nfs.h

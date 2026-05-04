@@ -1,0 +1,39 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  userspace-unit-tests:
+    name: userspace unit tests (libcheck)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            check \
+            libsubunit-dev \
+            pkg-config \
+            curl
+
+      # Cache the upstream Linux header fetch keyed on the pinned tag
+      # in tests/UPSTREAM-REVISION. Cache hit = ~0s; miss = a few
+      # short HTTP fetches from raw.githubusercontent.com.
+      - name: Cache upstream Linux headers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/enfs-tests-headers
+          key: enfs-tests-headers-${{ hashFiles('tests/UPSTREAM-REVISION', 'tests/LINUX-HEADERS-MANIFEST') }}
+
+      - name: Build and run userspace unit tests
+        run: make test
