@@ -102,7 +102,15 @@ TESTS := test_enfs_roundrobin test_enfs_multipath_parse test_loadbalance_simulat
          test_esunrpc_timer test_esunrpc_addr
 # test_esunrpc_xprtmultipath: needs more shim work (kobject, full
 # rpc_xprt, RPC_DISPLAY_*, idr); test source kept on disk, suite
-# TBD-enabled once shim is built out. Tracked as a follow-up issue.
+# TBD-enabled once shim is built out. Tracked as #44.
+
+# esunrpc_xdr: RFC 4506 XDR encode/decode primitives. Pure byte
+# manipulation; the tests only touch the linear (head[0]) segment
+# of xdr_buf so the page-helper stubs in esunrpc_xdr_stubs.c are
+# never reached.
+ENFS_SRC_test_esunrpc_xdr := $(ESUNRPC_SRC_ROOT)/xdr.c
+STUBS_test_esunrpc_xdr    := $(STUBS_DIR)/kernel_stubs.c \
+                              $(STUBS_DIR)/esunrpc_xdr_stubs.c
 
 ENFS_SRC_test_enfs_roundrobin := $(ENFS_SRC_ROOT)/enfs_roundrobin.c
 STUBS_test_enfs_roundrobin    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_deps_stubs.c
