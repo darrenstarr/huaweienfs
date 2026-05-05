@@ -182,15 +182,103 @@ slot=64. Tabulated in `secrets/perf-results/tier1/`.)
 
 ### 12.3.2 Tune TCP send/recv buffers
 
-(populated after benchmark)
+**Hypothesis:** at 100 Gbps × ~50 µs RTT (estimated lab fabric BDP),
+the bandwidth-delay product is ~625 KB. Stock Ubuntu autotune caps
+at 4 MiB which is well above that, but for safety we bumped to 256 MiB
+in case autotune was being conservative for some reason.
 
-### 12.3.3 Larger rsize/wsize (if supported by OceanStor)
+**Test:** sysctls applied, mount remounted, parallel matrix re-run.
 
-(populated after benchmark)
+```bash
+sysctl -w net.core.rmem_max=268435456 net.core.wmem_max=268435456
+sysctl -w net.ipv4.tcp_rmem='4096 1048576 268435456'
+sysctl -w net.ipv4.tcp_wmem='4096 1048576 268435456'
+```
 
-### 12.3.4 NFSv4.1+ sessions (if supported by OceanStor)
+#### Result: write throughput (MB/s)
 
-(populated after benchmark)
+| bs | streams | slot=128 baseline | + buf=256M | delta |
+|---|---|---|---|---|
+| 1M | 1 | 124 | 122 | -2% |
+| 1M | 4 | 487 | 484 | -1% |
+| 1M | 16 | 1856 | 1855 | -0% |
+| 1M | 64 | 5360 | 5290 | -1% |
+| 2M | 1 | 100 | 99 | -1% |
+| 2M | 4 | 404 | 404 | 0% |
+| 2M | 16 | 1433 | 1415 | -1% |
+| 2M | 64 | 3445 | 3474 | +1% |
+
+**Conclusion:** all-noise. BDP analysis was right — autotune already
+had enough headroom. Bumping the cap doesn't help when you weren't
+near it.
+
+### 12.3.3 Larger rsize/wsize
+
+**Hypothesis:** larger RPC payload = fewer RPCs per MB transferred =
+less per-RPC dispatcher overhead. Default is `rsize=1048576` (1 MiB)
+on this client; we tried `rsize=4194304` (4 MiB) and `rsize=8388608`
+(8 MiB).
+
+**Test:** mount remounted with `rsize=Nm,wsize=Nm`, parallel matrix
+re-run.
+
+```bash
+mount -t nfs -o ...,rsize=4194304,wsize=4194304 ...
+mount -t nfs -o ...,rsize=8388608,wsize=8388608 ...
+```
+
+#### Result: write throughput (MB/s)
+
+| bs | streams | slot=128+buf=256M | rs=4M | rs=8M | delta |
+|---|---|---|---|---|---|
+| 1M | 1 | 122 | 117 | 122 | 0% |
+| 1M | 4 | 484 | 486 | 485 | +0% |
+| 1M | 16 | 1855 | 1871 | 1819 | -2% |
+| 1M | 64 | 5290 | 5341 | 5380 | +2% |
+| 2M | 1 | 99 | 102 | 101 | +2% |
+| 2M | 4 | 404 | 402 | 402 | -0% |
+| 2M | 16 | 1415 | 1427 | 1441 | +2% |
+| 2M | 64 | 3474 | 3521 | 3425 | -1% |
+
+**Conclusion:** noise. The reason became visible in `mount` output
+*after* the remount:
+
+```text
+[<SRV1>]:/dCache on /mnt-tune type nfs (rw,relatime,vers=3,
+  rsize=1048576,wsize=1048576,...)
+```
+
+OceanStor negotiated rsize down to 1 MiB regardless of what the
+client requested. The "rs8m" run was actually still 1M RPCs. That
+explains the no-change result, and means rsize tuning is **not
+available against this server** — would need a server-side change.
+
+### 12.3.4 NFSv4.1+ sessions
+
+**Skipped.** The OceanStor exports here only speak NFSv3 + NFSv4.0;
+v4.1+ pNFS / sessions aren't on offer. Filed for visibility as
+[#28](https://github.com/darrenstarr/huaweienfs/issues/28).
+
+### 12.3.5 Tier 1 conclusion
+
+**Tier 1 is a no-op for this workload on this storage backend.**
+None of slot table (2→64→128→256), TCP buffer max (4M→256M), or
+rsize/wsize (1M→4M→8M requested; 1M actual) move single-stream or
+parallel throughput by more than ~5%, which is within run-to-run
+noise.
+
+That's the answer to "is the bottleneck stock-NFS-tunable?" — **no.**
+The constraint is somewhere else: either in the multipath dispatch
+path (Tier 2) or in the synchronous-RPC pipeline structure itself
+(Tier 3 + future work).
+
+Single-stream reads at 1 MiB blocks **dropped** from 67 to 43 MB/s
+across Tier 1.2/1.3, which is a small absolute regression but
+reproducible. Filed as
+[#29](https://github.com/darrenstarr/huaweienfs/issues/29) for
+investigation — not a Tier 1 conclusion-blocker but worth chasing
+because the only thing that changed was buffer sizing and that
+shouldn't make reads slower.
 
 ## 12.4 Tier 2 — enfs algorithmic changes
 
