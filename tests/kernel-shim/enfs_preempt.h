@@ -177,6 +177,61 @@ enum {
 #define NFS3_OK 0
 #endif
 
+/* String / number parsers used by addr.c et al. Real kernel pulls
+ * these in via <linux/kstrtox.h>; we declare here for SUTs that
+ * don't include it directly. */
+int kstrtou8(const char *s, unsigned int base, unsigned char *out);
+unsigned int kstrtouint(const char *s, unsigned int base, unsigned int *out);
+char *kstrdup(const char *s, unsigned int gfp);
+size_t strlcat(char *dst, const char *src, size_t size);
+
+/* IP-address parsers from <linux/inet.h>. */
+int in4_pton(const char *src, int srclen, unsigned char *dst,
+             int delim, const char **end);
+int in6_pton(const char *src, int srclen, unsigned char *dst,
+             int delim, const char **end);
+
+/* Maximum lengths from <linux/inet.h>. */
+#ifndef INET_ADDRSTRLEN
+#define INET_ADDRSTRLEN  16
+#endif
+#ifndef INET6_ADDRSTRLEN
+#define INET6_ADDRSTRLEN 48
+#endif
+
+/* IS_ENABLED(): kernel macro that resolves to 1 iff CONFIG_X is
+ * defined (to either 1 or m). For tests we always want the IPv6
+ * paths active. */
+#ifndef CONFIG_IPV6
+#define CONFIG_IPV6 1
+#endif
+#ifndef IS_ENABLED
+#define __ARG_PLACEHOLDER_1 0,
+#define ___is_defined(arg1_or_junk)  __take_second_arg(arg1_or_junk 1, 0)
+#define __take_second_arg(__ignored, val, ...) val
+#define __is_defined(x) ___is_defined(__ARG_PLACEHOLDER_##x)
+#define IS_ENABLED(option) __is_defined(option)
+#endif
+
+/* IPv6 scope-id constants from <net/ipv6.h>. Tests don't drive
+ * the scope-id branches of addr.c (those need real netdev infra),
+ * but the SUT still needs the constants to compile. */
+#ifndef IPV6_SCOPE_ID_LEN
+#define IPV6_SCOPE_ID_LEN 16
+#endif
+#ifndef IPV6_SCOPE_DELIMITER
+#define IPV6_SCOPE_DELIMITER '%'
+#endif
+
+/* Override snprintf so kernel-only %pI4 / %pI6 / %pI6c format
+ * specifiers (used by sunrpc/addr.c et al.) work in userspace.
+ * Implementation in tests/stubs/kernel_stubs.c. */
+#include <stddef.h>
+int enfs_test_snprintf(char *buf, size_t size, const char *fmt, ...);
+#ifndef ENFS_KERNEL_STUBS_INTERNAL
+#define snprintf enfs_test_snprintf
+#endif
+
 /* Forward decl for things below */
 struct rpc_xprt;
 struct rpc_clnt;

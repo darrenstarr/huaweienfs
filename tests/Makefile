@@ -97,7 +97,7 @@ LDLIBS := $(CHECK_LIBS) -lpthread
 
 TESTS := test_enfs_roundrobin test_enfs_multipath_parse test_loadbalance_simulator \
          test_pm_state test_failover_path test_enfs_path \
-         test_esunrpc_timer
+         test_esunrpc_timer test_esunrpc_addr
 
 ENFS_SRC_test_enfs_roundrobin := $(ENFS_SRC_ROOT)/enfs_roundrobin.c
 STUBS_test_enfs_roundrobin    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_deps_stubs.c
@@ -134,6 +134,11 @@ STUBS_test_enfs_path    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_path_st
 # No stubs needed beyond kernel_stubs (the file is pure math).
 ENFS_SRC_test_esunrpc_timer := $(ESUNRPC_SRC_ROOT)/timer.c
 STUBS_test_esunrpc_timer    := $(STUBS_DIR)/kernel_stubs.c
+
+# esunrpc_addr: presentation-form address conversion. Pure data
+# transformation; backed by the same in[46]_pton stubs as pm_state.
+ENFS_SRC_test_esunrpc_addr := $(ESUNRPC_SRC_ROOT)/addr.c
+STUBS_test_esunrpc_addr    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/esunrpc_addr_stubs.c
 
 # Address-list parser. Covers BOTH IPv4 (the production target for
 # customer storage) and IPv6 (the project lab fabric). Uses libc-
