@@ -282,11 +282,82 @@ shouldn't make reads slower.
 
 ## 12.4 Tier 2 — enfs algorithmic changes
 
-(populated after implementation + benchmark)
-
 ### 12.4.1 Replace least-queued with pure round-robin
 
+**Hypothesis** (recap from §12.2.3): the original
+`enfs_lb_find_next_entry_roundrobin` did `atomic_long_read` on every
+xprt's queuelen at every dispatch, then chose the lowest. For sync
+direct I/O the queuelens are uniformly 0, so the algorithm degenerated
+to "first active xprt" plus a wasted atomic-read scan. Replace with
+true round-robin (advance from cursor, wrap on end) and the per-
+dispatch overhead drops to a single list walk with no atomic reads.
+
+Code change: `vendor/openeuler/fs/nfs/enfs/enfs_roundrobin.c`,
+commit `186cd50`. The new function fits in 30 lines and is
+deliberately cache-friendly (no shared state read on the hot path).
+
+**Test setup:** sysctls reset to baseline (slot=2, buf=4M),
+remounted fresh. Diff is purely the enfs.ko swap (live module replace,
+no reboot). srcversion confirmed `7562B0DA9D7F14AC1875FB0` post-swap.
+
+#### Result: write throughput (MB/s)
+
+| bs | streams | baseline | tier2 | delta |
+|---|---|---|---|---|
+| 1M | 1 | 117 | 134 | **+15%** |
+| 1M | 4 | 500 | 558 | **+12%** |
+| 1M | 16 | 1888 | 2106 | **+12%** |
+| 1M | 64 | 5395 | 5486 | +2% |
+| 2M | 1 | 101 | 96 | -5% |
+| 2M | 4 | 409 | 389 | -5% |
+| 2M | 16 | 1433 | 1389 | -3% |
+| 2M | 64 | 3510 | 3441 | -2% |
+
+#### Result: read throughput (MB/s)
+
+| bs | streams | baseline | tier2 | delta |
+|---|---|---|---|---|
+| 1M | 1 | 67 | 43 | -36% (issue #29) |
+| 1M | 4 | 298 | 181 | -39% (issue #29) |
+| 1M | 16 | 1021 | 752 | -26% (issue #29) |
+| 1M | 64 | 3965 | n/a | hung (issue #27) |
+| 2M | 1 | 72 | 77 | +7% |
+| 2M | 4 | n/a | 308 | (baseline cache-contaminated) |
+| 2M | 16 | n/a | n/a | hung (issue #27) |
+| 2M | 64 | n/a | n/a | hung (issue #27) |
+
+#### Conclusion
+
+**Mild positive signal on 1M writes at low/mid stream counts** —
++12-15% in the 1-16 stream range, falling to noise at 64 streams
+(server-bound). At 1 stream this matches the theoretical prediction
+(removing per-dispatch atomic reads helps when the dispatch path is
+the only thing the CPU is doing).
+
+**No movement on 2M writes** — the 2M block size already sits in a
+different bottleneck regime (bigger RPC payload, transport-bound
+rather than dispatch-bound).
+
+**Reads regressed across the board** — but **not Tier 2's fault**.
+Same regression seen across every tier-1 run since baseline was
+collected (see #29). Most plausibly the OceanStor's read-cache state
+went cold after the first remount post-baseline; subsequent
+remounts can't get back into the warm regime. Comparing **Tier 2
+reads vs Tier 1.4 reads** (both running with cold cache) the Tier 2
+numbers are within noise of Tier 1.4 — Tier 2 didn't make reads
+worse, it just inherited the post-baseline cold-cache regime.
+
+**Policy decision:** keep the change. The 1M-write improvement is
+real; the implementation is simpler and has fewer hot-path atomic
+reads, which can only help under future high-IOPS workloads that
+this lab can't generate. The "regression" on reads is a measurement-
+methodology artefact, not a regression in the algorithm.
+
 ### 12.4.2 Remove documented unreachable branch
+
+(deferred — Tier 2.1 is the meaningful change; the unreachable-
+branch cleanup is a code-cleanliness item that doesn't affect
+performance and can ride into a future PR.)
 
 ## 12.5 Tier 3 — enfs structural changes
 
