@@ -110,13 +110,17 @@ Two facts dominate:
    each transport. Parallelism improvements have to attack
    per-transport throughput or add more transports.
 
-3. **DPC's 372,000 IOPS at 8K reads is ~2.5 μs per RPC.** Even with
-   100 Gbps RDMA-grade hardware, wire RTT alone is multiple
-   microseconds. The implication is that DPC has a fast path that
-   pipelines aggressively (likely RDMA-style) AND benefits from
-   server-side cache (we wrote those files seconds before reading
-   them). Whatever the mechanism, the reference number is
-   "saturates the link."
+3. **DPC's 372,000 IOPS at 8K reads is ~2.5 μs per RPC.** This is
+   over **plain TCP**, NOT RDMA — the lab DPC client is not
+   configured for RoCE/iWARP (confirmed by the storage admin). At
+   2.5 μs per RPC over TCP, DPC must be doing **massive RPC
+   pipelining within a single transport** — hundreds of RPCs in
+   flight at once, with the wire RTT amortised across them. It also
+   clearly benefits from server-side cache (we wrote those files
+   seconds before reading them). Whatever the exact mechanism,
+   stock NFS over TCP is single-RPC-in-flight-per-task, so the gap
+   between enfs's 392 IOPS and DPC's 372 K IOPS at the same wire
+   speed is ~1000× of in-flight pipelining.
 
 ### 12.2.4 Anomalies
 
@@ -393,9 +397,11 @@ hardware.
 
 **When this would matter:** workload that issues many cheap RPCs
 per second from many CPUs simultaneously — small-block buffered
-writes with `iodepth>1`, or NFS-over-RDMA where RPC RTT collapses
-to microseconds and dispatch overhead becomes the limit. Neither
-applies here.
+writes with `iodepth>1`, or any pipelined-RPC transport (NFSv4.1+
+sessions, NFS-over-RDMA, or a hypothetical TCP RPC pipelining
+layer like the one DPC apparently has) where each RPC's wall time
+collapses to microseconds and dispatch overhead becomes the limit.
+None of those apply to the current enfs+stock-sunrpc+TCP setup.
 
 **Filed as [#31](https://github.com/darrenstarr/huaweienfs/issues/31)**
 for revisit if/when the workload profile changes. The change is
@@ -406,13 +412,17 @@ in `xprtmultipath.h`.
 
 - **Pipelined RPC dispatch (RPC pipelining within one xprt):** would
   remove the synchronous-1-RPC-in-flight-per-task ceiling in §12.2.3
-  (330–400 IOPS regardless of block size). Largest single lever for
-  single-stream throughput. Big change — touches sunrpc, not
-  enfs. Filed as [#32](https://github.com/darrenstarr/huaweienfs/issues/32).
-- **NFS-over-RDMA / RoCE transport:** would shrink RPC RTT from ~3
-  ms to single-digit µs. The actual reason DPC achieves its
-  numbers; not implementable inside enfs.ko. Out of scope for this
-  project.
+  (330–400 IOPS regardless of block size). **This is the biggest
+  available lever and the one that explains DPC's numbers** — DPC
+  on this lab is plain TCP (not RDMA), and the only way to get
+  370 K IOPS over plain TCP is hundreds of in-flight RPCs per
+  transport. Big change — touches sunrpc, not enfs. Filed as
+  [#32](https://github.com/darrenstarr/huaweienfs/issues/32).
+- **NFS-over-RDMA / RoCE transport:** orthogonal to pipelining;
+  would shrink RPC RTT from ~3 ms to single-digit µs and reduce
+  CPU cost on both sides. Not implementable inside enfs.ko. Out of
+  scope for this project, and not the lever DPC actually uses on
+  this lab.
 
 ## 12.6 Recommendations
 
@@ -430,10 +440,13 @@ Based on Tier 1 and Tier 2 measurements (Tier 3 deferred per §12.5.1):
    from 70 MB/s at 1 stream — 77× speedup. The lever isn't in the
    client tunables; it's in how you structure the workload.
 4. **Don't compare enfs single-stream to DPC single-stream as a
-   meaningful metric.** DPC has a fundamentally different transport
-   (RDMA/pipelined). The fair comparison is aggregate throughput at
-   the workload's actual concurrency — and enfs reaches ~33% of
-   DPC's parallel ceiling, which is a much closer race.
+   meaningful metric.** DPC and enfs use the same transport (TCP)
+   on this lab, but DPC pipelines hundreds of RPCs per xprt where
+   stock sunrpc is one-RPC-in-flight-per-task. That's a structural
+   difference in the RPC layer, not in either client's multipath
+   logic. The fair comparison is aggregate throughput at the
+   workload's actual concurrency — and enfs reaches ~33% of DPC's
+   parallel ceiling, which is a much closer race.
 
 ## 12.7 Reproducing this
 
