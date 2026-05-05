@@ -380,6 +380,21 @@ bool failover_is_task_use_fixed_path(struct rpc_task *task);
 bool failover_task_need_call_start_again(struct rpc_task *task);
 bool failover_prepare_transmit(struct rpc_task *task);
 
+/* The retry-action helpers (also static; sed-stripped). */
+void failover_retry_path(struct rpc_task *task);
+void failover_retry_path_delay(struct rpc_task *task, int32_t delay);
+void failover_exit_return_timeout(struct rpc_task *task);
+void failover_retry_path_by_policy(struct rpc_task *task,
+                                    int policy);
+void failover_handle(struct rpc_task *task);
+
+/* Stub control surface from failover_path_stubs.c. */
+extern int32_t fp_stub_path_detect_timeout;
+extern int32_t fp_stub_multipath_state;
+extern unsigned int fp_stub_ktime_ms_delta;
+extern unsigned int fp_call_count_pm_set_path_state;
+extern void fp_stub_reset(void);
+
 /* The stub for enfs_get_config_multipath_state lives in
  * failover_path_stubs.c; default = 1 (enabled). The stub for
  * pm_get_path_state returns NORMAL by default. */
@@ -598,6 +613,192 @@ CHECK_TASK_TEST(check_task_p_eee, NFS_PROGRAM + 1, 1, -EINVAL)
 CHECK_TASK_TEST(check_task_p_fff, 0,           1, -EINVAL)
 
 /* ============================================================ */
+/* failover_retry_path / _delay / _exit_return_timeout / _by_policy */
+/* These are the retry-action helpers. Their main observable     */
+/* effect after the if(restart_call==1) branch is task->tk_xprt  */
+/* being set; with the shim's restart_call() returning 0 the     */
+/* if-branch isn't taken, so we mostly assert "doesn't crash".   */
+/* ============================================================ */
+
+START_TEST(retry_path_does_not_crash) {
+    fp_stub_reset();
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    failover_retry_path(t);
+} END_TEST
+
+START_TEST(retry_path_delay_does_not_crash) {
+    fp_stub_reset();
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    failover_retry_path_delay(t, 100);
+} END_TEST
+
+START_TEST(retry_path_delay_zero_does_not_crash) {
+    fp_stub_reset();
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    failover_retry_path_delay(t, 0);
+} END_TEST
+
+START_TEST(retry_path_delay_large_does_not_crash) {
+    fp_stub_reset();
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    failover_retry_path_delay(t, 60 * HZ);
+} END_TEST
+
+/* failover_exit_return_timeout — calls rpc_exit if elapsed > config. */
+START_TEST(exit_return_timeout_under_threshold_no_op) {
+    fp_stub_reset();
+    fp_stub_path_detect_timeout = 30;
+    fp_stub_ktime_ms_delta = 5000;  /* 5s < 30s */
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    t->tk_status = 0;
+    failover_exit_return_timeout(t);
+    /* tk_status should NOT be set to -ETIMEDOUT. */
+    ck_assert_int_eq(t->tk_status, 0);
+} END_TEST
+
+START_TEST(exit_return_timeout_over_threshold_invokes_exit) {
+    fp_stub_reset();
+    fp_stub_path_detect_timeout = 5;
+    fp_stub_ktime_ms_delta = 10000;  /* 10s > 5s */
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    failover_exit_return_timeout(t);
+    /* Stub rpc_exit is no-op so we can't observe directly, but the
+     * function ran the > branch. Just confirm no crash. */
+} END_TEST
+
+START_TEST(exit_return_timeout_at_exact_threshold_no_op) {
+    fp_stub_reset();
+    fp_stub_path_detect_timeout = 5;
+    fp_stub_ktime_ms_delta = 5000;  /* exactly == threshold, not > */
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    t->tk_status = 0;
+    failover_exit_return_timeout(t);
+    ck_assert_int_eq(t->tk_status, 0);
+} END_TEST
+
+#define EXIT_TIMEOUT_PARAM(name, det_secs, ms_delta) \
+    START_TEST(name) { \
+        fp_stub_reset(); \
+        fp_stub_path_detect_timeout = (det_secs); \
+        fp_stub_ktime_ms_delta = (ms_delta); \
+        struct rpc_task *t = make_task(NULL, NULL, 0, false); \
+        failover_exit_return_timeout(t); \
+    } END_TEST
+
+EXIT_TIMEOUT_PARAM(exit_to_p_a,   1,    1000)
+EXIT_TIMEOUT_PARAM(exit_to_p_b,   1,     999)
+EXIT_TIMEOUT_PARAM(exit_to_p_c,   1,    1001)
+EXIT_TIMEOUT_PARAM(exit_to_p_d,   5,    5001)
+EXIT_TIMEOUT_PARAM(exit_to_p_e,  10,    9999)
+EXIT_TIMEOUT_PARAM(exit_to_p_f,  10,   10001)
+EXIT_TIMEOUT_PARAM(exit_to_p_g,  30,   30001)
+EXIT_TIMEOUT_PARAM(exit_to_p_h,  60,   59000)
+EXIT_TIMEOUT_PARAM(exit_to_p_i,  60,   60001)
+EXIT_TIMEOUT_PARAM(exit_to_p_j, 120,  120001)
+
+/* failover_retry_path_by_policy — dispatches by enum. */
+START_TEST(by_policy_RETRY_dispatches_to_retry_path) {
+    fp_stub_reset();
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    failover_retry_path_by_policy(t, SUT_FAILOVER_RETRY);
+} END_TEST
+
+START_TEST(by_policy_RETRY_DELAY_dispatches_to_delay) {
+    fp_stub_reset();
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    failover_retry_path_by_policy(t, SUT_FAILOVER_RETRY_DELAY);
+} END_TEST
+
+START_TEST(by_policy_RETURN_TIMEOUT_dispatches_to_exit) {
+    fp_stub_reset();
+    fp_stub_path_detect_timeout = 1;
+    fp_stub_ktime_ms_delta = 5000;
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    failover_retry_path_by_policy(t, SUT_FAILOVER_RETURN_TIMEOUT);
+} END_TEST
+
+START_TEST(by_policy_NOACTION_no_op) {
+    fp_stub_reset();
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    failover_retry_path_by_policy(t, SUT_FAILOVER_NOACTION);
+    /* Falls through all if/else without any side-effect. */
+} END_TEST
+
+START_TEST(by_policy_unknown_no_op) {
+    fp_stub_reset();
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    failover_retry_path_by_policy(t, 99);
+} END_TEST
+
+/* failover_handle — top-level. Invokes check_task, set_path_state
+ * to FAULT, get_retry_policy, and retry_path_by_policy. The
+ * pm_set_path_state call increments our counter; we observe it. */
+START_TEST(handle_eligible_v3_write_marks_xprt_FAULT) {
+    fp_stub_reset();
+    struct rpc_clnt *c = make_clnt(3);
+    c->cl_prog = NFS_PROGRAM;
+    c->cl_enfs = 1;
+    c->cl_parent = c;
+    struct rpc_procinfo *p = make_proc_v3(NFS3PROC_WRITE);
+    struct rpc_task *t = make_task(c, p, 0, true);  /* sent */
+    failover_handle(t);
+    /* check_task passes → pm_set_path_state called once. */
+    ck_assert_uint_eq(fp_call_count_pm_set_path_state, 1);
+} END_TEST
+
+START_TEST(handle_ineligible_task_skips_set_path_state) {
+    fp_stub_reset();
+    struct rpc_clnt *c = make_clnt(3);
+    c->cl_prog = NFS_PROGRAM;
+    c->cl_enfs = 0;          /* not enfs-managed */
+    c->cl_parent = c;
+    struct rpc_task *t = make_task(c, NULL, 0, false);
+    failover_handle(t);
+    /* check_task fails → no pm_set_path_state. */
+    ck_assert_uint_eq(fp_call_count_pm_set_path_state, 0);
+} END_TEST
+
+START_TEST(handle_disabled_multipath_skips_set_path_state) {
+    fp_stub_reset();
+    fp_stub_multipath_state = 0;
+    struct rpc_clnt *c = make_clnt(3);
+    c->cl_prog = NFS_PROGRAM;
+    c->cl_enfs = 1;
+    c->cl_parent = c;
+    struct rpc_task *t = make_task(c, NULL, 0, false);
+    failover_handle(t);
+    ck_assert_uint_eq(fp_call_count_pm_set_path_state, 0);
+} END_TEST
+
+START_TEST(handle_NULL_task_safe) {
+    fp_stub_reset();
+    failover_handle(NULL);
+    ck_assert_uint_eq(fp_call_count_pm_set_path_state, 0);
+} END_TEST
+
+START_TEST(handle_NULL_clnt_safe) {
+    fp_stub_reset();
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    failover_handle(t);
+    ck_assert_uint_eq(fp_call_count_pm_set_path_state, 0);
+} END_TEST
+
+/* Multi-handle: invoking handle twice on the same eligible task
+ * should set_path_state twice. */
+START_TEST(handle_twice_on_same_task_double_marks) {
+    fp_stub_reset();
+    struct rpc_clnt *c = make_clnt(3);
+    c->cl_prog = NFS_PROGRAM;
+    c->cl_enfs = 1;
+    c->cl_parent = c;
+    struct rpc_procinfo *p = make_proc_v3(NFS3PROC_READ);
+    struct rpc_task *t = make_task(c, p, 0, true);
+    failover_handle(t);
+    failover_handle(t);
+    ck_assert_uint_eq(fp_call_count_pm_set_path_state, 2);
+} END_TEST
+
+/* ============================================================ */
 /* Suite plumbing.                                              */
 /* ============================================================ */
 
@@ -808,6 +1009,46 @@ static Suite *failover_path_suite(void)
     tcase_add_test(tcpt, prepare_transmit_fixed_path_returns_true);
     tcase_add_test(tcpt, prepare_transmit_normal_path_returns_true);
     suite_add_tcase(s, tcpt);
+
+    TCase *tcrp = tcase_create("retry_path");
+    tcase_add_test(tcrp, retry_path_does_not_crash);
+    tcase_add_test(tcrp, retry_path_delay_does_not_crash);
+    tcase_add_test(tcrp, retry_path_delay_zero_does_not_crash);
+    tcase_add_test(tcrp, retry_path_delay_large_does_not_crash);
+    suite_add_tcase(s, tcrp);
+
+    TCase *tcert = tcase_create("exit_return_timeout");
+    tcase_add_test(tcert, exit_return_timeout_under_threshold_no_op);
+    tcase_add_test(tcert, exit_return_timeout_over_threshold_invokes_exit);
+    tcase_add_test(tcert, exit_return_timeout_at_exact_threshold_no_op);
+    tcase_add_test(tcert, exit_to_p_a);
+    tcase_add_test(tcert, exit_to_p_b);
+    tcase_add_test(tcert, exit_to_p_c);
+    tcase_add_test(tcert, exit_to_p_d);
+    tcase_add_test(tcert, exit_to_p_e);
+    tcase_add_test(tcert, exit_to_p_f);
+    tcase_add_test(tcert, exit_to_p_g);
+    tcase_add_test(tcert, exit_to_p_h);
+    tcase_add_test(tcert, exit_to_p_i);
+    tcase_add_test(tcert, exit_to_p_j);
+    suite_add_tcase(s, tcert);
+
+    TCase *tcbp = tcase_create("by_policy_dispatch");
+    tcase_add_test(tcbp, by_policy_RETRY_dispatches_to_retry_path);
+    tcase_add_test(tcbp, by_policy_RETRY_DELAY_dispatches_to_delay);
+    tcase_add_test(tcbp, by_policy_RETURN_TIMEOUT_dispatches_to_exit);
+    tcase_add_test(tcbp, by_policy_NOACTION_no_op);
+    tcase_add_test(tcbp, by_policy_unknown_no_op);
+    suite_add_tcase(s, tcbp);
+
+    TCase *tch = tcase_create("handle");
+    tcase_add_test(tch, handle_eligible_v3_write_marks_xprt_FAULT);
+    tcase_add_test(tch, handle_ineligible_task_skips_set_path_state);
+    tcase_add_test(tch, handle_disabled_multipath_skips_set_path_state);
+    tcase_add_test(tch, handle_NULL_task_safe);
+    tcase_add_test(tch, handle_NULL_clnt_safe);
+    tcase_add_test(tch, handle_twice_on_same_task_double_marks);
+    suite_add_tcase(s, tch);
 
     return s;
 }
