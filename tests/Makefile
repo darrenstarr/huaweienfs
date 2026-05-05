@@ -24,7 +24,9 @@ HEADERS_DIR   := $(BUILD_DIR)/linux-headers
 SHIM_DIR      := $(CURDIR)/kernel-shim
 STUBS_DIR     := $(CURDIR)/stubs
 UNIT_DIR      := $(CURDIR)/unit
-ENFS_SRC_ROOT := $(ROOT)/vendor/openeuler/fs/nfs/enfs
+ENFS_SRC_ROOT     := $(ROOT)/vendor/openeuler/fs/nfs/enfs
+ESUNRPC_SRC_ROOT  := $(ROOT)/vendor/esunrpc/net/esunrpc
+ESUNRPC_INC_ROOT  := $(ROOT)/vendor/esunrpc/include
 
 # Compiler flags.
 #   -Dstatic=         expose `static` functions for direct testing
@@ -94,7 +96,8 @@ LDLIBS := $(CHECK_LIBS) -lpthread
 # ---------------------------------------------------------------------
 
 TESTS := test_enfs_roundrobin test_enfs_multipath_parse test_loadbalance_simulator \
-         test_pm_state test_failover_path test_enfs_path
+         test_pm_state test_failover_path test_enfs_path \
+         test_esunrpc_timer
 
 ENFS_SRC_test_enfs_roundrobin := $(ENFS_SRC_ROOT)/enfs_roundrobin.c
 STUBS_test_enfs_roundrobin    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_deps_stubs.c
@@ -124,6 +127,13 @@ STUBS_test_failover_path    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/failover
 # enfs_path: tiny xprt-context lifecycle (alloc + free).
 ENFS_SRC_test_enfs_path := $(ENFS_SRC_ROOT)/enfs_path.c
 STUBS_test_enfs_path    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_path_stubs.c
+
+# esunrpc_timer: Van Jacobson RTT estimator from the esunrpc fork.
+# First test target to compile a vendor/esunrpc/ source — exercises
+# the tests/kernel-shim/esunrpc/ shim directory + asm/param.h shim.
+# No stubs needed beyond kernel_stubs (the file is pure math).
+ENFS_SRC_test_esunrpc_timer := $(ESUNRPC_SRC_ROOT)/timer.c
+STUBS_test_esunrpc_timer    := $(STUBS_DIR)/kernel_stubs.c
 
 # Address-list parser. Covers BOTH IPv4 (the production target for
 # customer storage) and IPv6 (the project lab fabric). Uses libc-
