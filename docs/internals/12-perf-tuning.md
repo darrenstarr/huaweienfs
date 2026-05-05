@@ -481,7 +481,172 @@ Based on Tier 1 and Tier 2 measurements (Tier 3 deferred per §12.5.1):
    workload's actual concurrency — and enfs reaches ~33% of DPC's
    parallel ceiling, which is a much closer race.
 
-## 12.7 Reproducing this
+## 12.7 Pipelining experiment — direct I/O against OceanStor
+
+After completing Tiers 1–3, a follow-up question came up: stock
+NFSv3 over TCP already supports many RPCs in flight per xprt
+(`tcp_slot_table_entries` controls this; default 16, max 1024).
+And the kernel NFS direct-I/O path (`nfs_direct_write_schedule_iovec`
+→ `nfs_pageio_complete` → `nfs_direct_wait`) is structured to
+queue all sub-RPCs and wait for them collectively, not serially.
+
+**So if a single `write(fd, buf, 1MB)` syscall with `rsize=64K`
+got split into 16 in-flight RPCs and pipelined, single-stream
+throughput should jump dramatically.** Up to ~16× of the rsize=1M
+single-RPC-per-syscall baseline, in the most-optimistic case.
+
+That hypothesis was the motivation behind issue #32. Tested it
+directly here.
+
+### 12.7.1 Methodology
+
+Same lab setup as §12.1. Mount remounted with progressively
+smaller `rsize=`/`wsize=` while holding `bs=1M` (so each fio
+syscall is always 1 MiB and the variable is purely how many
+RPCs the kernel splits it into). `tcp_slot_table_entries=64`
+(plenty of headroom). Single fio thread, `psync` engine,
+`direct=1`, `time_based=1`, runtime 20 s + 2 s ramp.
+
+| rsize | RPCs per `write(1M)` |
+|---|---|
+| 1 MiB  | 1  (control — equals Tier 2 baseline) |
+| 256 KiB | 4 |
+| 64 KiB  | 16 |
+| 32 KiB  | 32 |
+
+If the kernel pipelines, the 16-RPC variant should approach the
+single-RPC variant's throughput multiplied by some factor
+proportional to in-flight depth (capped by network/storage at
+some point). If it doesn't pipeline (issues serially), all the
+small-rsize variants should be drastically slower.
+
+### 12.7.2 Result
+
+Single-stream `psync direct=1 bs=1M write`, varying `rsize`:
+
+| rsize | observed write MB/s | observed write IOPS | vs control |
+|---|---|---|---|
+| 1 MiB   | 121 | 115 | 1.00× (control) |
+| 256 KiB |  50 |  48 | 0.41× |
+| 64 KiB  |  67 |  63 | 0.55× |
+| 32 KiB  |   3 |   3 | 0.02× |
+
+Single-stream reads under the same conditions: **all rsize<1M
+variants timed out at 60 s wall** — fio could not complete a
+22-second test in 60 seconds at any rsize smaller than 1 MiB.
+At rsize=1M the read completed normally at 182 MB/s.
+
+A second test using `libaio` with `iodepth=4/16/64` from a single
+thread (forcing N concurrent RPCs without depending on the
+split-and-dispatch path) was attempted, but the OceanStor backend
+itself began degrading mid-experiment (write throughput on the
+psync iod=1 control dropped from ~134 MB/s to ~1 MB/s persistently,
+unrelated to client config — see §12.7.4). The libaio numbers
+collected in that window are not reliable enough to draw
+conclusions from and are excluded.
+
+### 12.7.3 Interpretation
+
+**Smaller rsize made everything worse, not better.** That's the
+opposite of what split-and-pipeline predicts. Two possibilities:
+
+1. **The kernel does not actually pipeline split direct-I/O writes.**
+   Despite the architecture of `nfs_pageio_complete`, the actual
+   submission may be effectively serial (for example, blocking on
+   write-back of one RPC before queueing the next). If so, the
+   only effect of smaller rsize is multiplying per-RPC overhead
+   without gaining wire-level parallelism — exactly matching the
+   measured numbers.
+2. **The OceanStor handles many small parallel I/Os to the same
+   file very poorly.** If its server-side path serialises overlapping
+   I/Os to one file (e.g., for write atomicity, or due to a
+   per-file lock in dCache), then the client could be issuing 16
+   in-flight RPCs but the server processes them serially anyway,
+   adding queue-wait latency on top of the per-RPC cost.
+
+Both possibilities are real. Server-side telemetry would distinguish
+them: if the OceanStor reports 16 simultaneous READ RPCs on the
+wire then queues them, it's possibility 2; if it sees them arriving
+strictly serialised one-at-a-time, it's possibility 1.
+
+Either way, **the "lever" hypothesis (smaller rsize → kernel
+pipelines for free) is empirically false on this stack.** RPC
+pipelining as DPC apparently uses it cannot be obtained by tuning
+mount options on stock NFSv3. It would require either:
+
+- A protocol change at the sunrpc layer (custom in-flight window
+  with reordering), or
+- A custom client below the syscall API (which is what DPC is, in
+  effect — its TCP pipelining is not stock NFSv3 over TCP)
+
+Issue #32 stays open with this clarification: the lever is real but
+not accessible from stock NFSv3 + Linux client.
+
+### 12.7.4 OceanStor backend wobble (2026-05-05 ~05:55 UTC)
+
+Mid-test, single-stream `psync direct=1 bs=1M` write throughput
+on **both** mounts (`/mnt` user session AND `/mnt-tune` test
+mount) dropped from ~134 MB/s to ~1.5 MB/s and stayed there for
+at least 30 minutes. ICMPv6 RTT to all 8 OceanStor IPs remained
+sub-millisecond throughout (so it wasn't a network problem). No
+client-side dmesg errors. NFS server reachability via `cat
+/proc/fs/nfsfs/servers` showed all xprts up.
+
+`dd if=/dev/zero of=/mnt-tune/probe bs=1M count=100 oflag=direct`
+ran at 2.3 MB/s during the wobble — same degradation visible
+without going through fio.
+
+This rules out the slowdown being client-side (sysctls, mount
+options, slot tables, enfs.ko) and points at the OceanStor
+backend itself: a deep scrub, rebalancing operation, neighbour
+tenant noisy on the cluster, or a transient internal queue
+problem. **Filed as
+[#34](https://github.com/darrenstarr/huaweienfs/issues/34)** for
+the storage admin to investigate against backend-side telemetry.
+The libaio iodepth experiment was abandoned because of this; will
+re-run when the backend is healthy again.
+
+### 12.7.5 What we'd ask Huawei
+
+If submitting this to Huawei as a support / RFE issue, the asks
+that would advance the analysis are:
+
+1. **Confirm whether DPC's pipelining is at the NFS protocol
+   layer or below it.** If DPC issues stock NFSv3 RPCs but with a
+   private async-pipeline transport, that's one story; if DPC uses
+   a Huawei-private RPC protocol over TCP (e.g., an early
+   out-of-order completion path), that's a different story. The
+   answer determines whether enfs could ever match DPC by
+   improving sunrpc, or whether DPC is structurally inaccessible
+   to a stock-NFS client.
+2. **Recommend OceanStor-side knobs (if any) for many parallel
+   small I/Os to the same file.** If there's a `dCache` config
+   option that switches per-file serialisation off (or to a
+   pool-level lock), that would distinguish possibility 2 above
+   from possibility 1.
+3. **Provide a server-side trace of the §12.7.2 test.** With one
+   `bs=1M, rsize=64K` direct write per second from one client,
+   how many RPCs does the OceanStor see arriving in parallel for
+   that file at any instant? If the answer is "1", the kernel is
+   serialising client-side; if "16", the OceanStor is serialising
+   server-side. This single number resolves the analysis.
+4. **Comment on whether the §12.7.4 throughput wobble is a known
+   OceanStor symptom.** Sudden, sustained, multi-tenant drop to
+   ~1 MB/s with no client-visible cause — is there a reproducible
+   trigger or a server-side log entry that correlates? Issue #33
+   filed for visibility.
+5. **Confirm OceanStor's NFS rsize cap.** §12.3.3 observed the
+   server negotiating client-requested `rsize=4M`/`8M` down to
+   1 MiB. Is this configurable per export? Larger `rsize` would
+   reduce per-RPC overhead for the workloads that sit in the
+   single-RPC-per-syscall regime.
+
+These five points are the substantive deliverable from the
+performance work in this branch. Items 1–3 directly inform whether
+issue #32 is a viable enfs-side improvement or strictly a sunrpc
+work item.
+
+## 12.8 Reproducing this
 
 The fio job runner used for the baseline + Tier 1 lives at
 `scripts/perf-bench.sh` in the repo (added in this chapter's
