@@ -445,6 +445,37 @@ V6_NTOP_TEST(ntop_v6_2620_c,         "2620:0:2d0::2")
 V6_NTOP_TEST(ntop_v6_2400,           "2400::1")
 V6_NTOP_TEST(ntop_v6_2607,           "2607::1")
 
+/* Yet more pton parametric tests for v4 — cover full octet ranges. */
+#define V4_PTON_PARAM(name, str) V4_PTON_TEST(name, str)
+
+V4_PTON_PARAM(pton_v4_extended_a, "1.2.3.4")
+V4_PTON_PARAM(pton_v4_extended_b, "5.6.7.8")
+V4_PTON_PARAM(pton_v4_extended_c, "9.10.11.12")
+V4_PTON_PARAM(pton_v4_extended_d, "13.14.15.16")
+V4_PTON_PARAM(pton_v4_extended_e, "17.18.19.20")
+V4_PTON_PARAM(pton_v4_extended_f, "21.22.23.24")
+V4_PTON_PARAM(pton_v4_extended_g, "25.26.27.28")
+V4_PTON_PARAM(pton_v4_extended_h, "29.30.31.32")
+V4_PTON_PARAM(pton_v4_extended_i, "100.101.102.103")
+V4_PTON_PARAM(pton_v4_extended_j, "200.201.202.203")
+V4_PTON_PARAM(pton_v4_extended_k, "240.241.242.243")
+V4_PTON_PARAM(pton_v4_extended_l, "250.251.252.253")
+
+#define V6_PTON_PARAM(name, str) V6_PTON_TEST(name, str)
+
+V6_PTON_PARAM(pton_v6_extended_a, "2001:db8::a")
+V6_PTON_PARAM(pton_v6_extended_b, "2001:db8::b")
+V6_PTON_PARAM(pton_v6_extended_c, "2001:db8::c")
+V6_PTON_PARAM(pton_v6_extended_d, "fc00::a")
+V6_PTON_PARAM(pton_v6_extended_e, "fc01::b")
+V6_PTON_PARAM(pton_v6_extended_f, "fc02::c")
+V6_PTON_PARAM(pton_v6_extended_g, "fd00::1234")
+V6_PTON_PARAM(pton_v6_extended_h, "fd01::5678")
+V6_PTON_PARAM(pton_v6_extended_i, "2620:0:1::1")
+V6_PTON_PARAM(pton_v6_extended_j, "2620:0:1::2")
+V6_PTON_PARAM(pton_v6_extended_k, "2620:0:1::3")
+V6_PTON_PARAM(pton_v6_extended_l, "2620:0:1::4")
+
 /* ============================================================ */
 /* Suite plumbing                                                */
 /* ============================================================ */
@@ -608,6 +639,34 @@ static Suite *esunrpc_addr_suite(void)
     tcase_add_test(t11, ntop_v6_2400);
     tcase_add_test(t11, ntop_v6_2607);
     suite_add_tcase(s, t11);
+
+    /* Extended pton coverage. */
+    TCase *t12 = tcase_create("pton_extended");
+    tcase_add_test(t12, pton_v4_extended_a);
+    tcase_add_test(t12, pton_v4_extended_b);
+    tcase_add_test(t12, pton_v4_extended_c);
+    tcase_add_test(t12, pton_v4_extended_d);
+    tcase_add_test(t12, pton_v4_extended_e);
+    tcase_add_test(t12, pton_v4_extended_f);
+    tcase_add_test(t12, pton_v4_extended_g);
+    tcase_add_test(t12, pton_v4_extended_h);
+    tcase_add_test(t12, pton_v4_extended_i);
+    tcase_add_test(t12, pton_v4_extended_j);
+    tcase_add_test(t12, pton_v4_extended_k);
+    tcase_add_test(t12, pton_v4_extended_l);
+    tcase_add_test(t12, pton_v6_extended_a);
+    tcase_add_test(t12, pton_v6_extended_b);
+    tcase_add_test(t12, pton_v6_extended_c);
+    tcase_add_test(t12, pton_v6_extended_d);
+    tcase_add_test(t12, pton_v6_extended_e);
+    tcase_add_test(t12, pton_v6_extended_f);
+    tcase_add_test(t12, pton_v6_extended_g);
+    tcase_add_test(t12, pton_v6_extended_h);
+    tcase_add_test(t12, pton_v6_extended_i);
+    tcase_add_test(t12, pton_v6_extended_j);
+    tcase_add_test(t12, pton_v6_extended_k);
+    tcase_add_test(t12, pton_v6_extended_l);
+    suite_add_tcase(s, t12);
 
     return s;
 }
