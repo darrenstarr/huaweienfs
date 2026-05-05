@@ -66,7 +66,7 @@ jobs:
               | grep -v '^vendor/' \
               | grep -v '^.github/workflows/lint.yml$' \
               | xargs grep -nE \
-              '10\.200\.|10\.27\.|10\.2\.0\.4|/opt/data/vms|/mnt/ramdisk|Minions12345|52:54:00:e2:60:33|4c:00:82:f3:84:c1|fc07:[23]|2001:948:61:1|diskpool04|\bnetadmin\b' \
+              '10\.200\.|10\.27\.|10\.2\.0\.4|/opt/data/vms|/mnt/ramdisk|Minions12345|52:54:00:e2:60:33|4c:00:82:f3:84:c1|fc07:[23]|2001:948:61:1|diskpool0[24]|gridstorage\.uiocloud|\bnetadmin\b' \
               2>/dev/null; then
             echo "::error::Private deployment values found in tracked files. Move them to secrets/ (gitignored)."
             exit 1
