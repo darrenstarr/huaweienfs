@@ -42,7 +42,16 @@ struct rpc_task {
     unsigned long        tk_flags;
     unsigned long        tk_runstate;     /* RPC_TASK_SENT bit etc. */
     unsigned long        tk_start;
+    unsigned long        tk_timeout;      /* per-call timeout (jiffies) */
     int                  tk_status;       /* per-call result */
+};
+
+/* Subset of struct rpc_rqst — failover_time.c reads rq_task,
+ * rq_timeout, rq_majortimeo. */
+struct rpc_rqst {
+    struct rpc_task     *rq_task;
+    unsigned long        rq_timeout;
+    unsigned long        rq_majortimeo;
 };
 
 /* RPC_WAS_SENT(task) — production reads RPC_TASK_SENT bit of tk_runstate

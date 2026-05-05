@@ -163,6 +163,9 @@ enum {
 #define ENFS_MULTIPATH_ENABLE 1
 #endif
 
+/* jiffies — controllable from tests via failover_time stubs. */
+extern unsigned long jiffies;
+
 /* Misc kernel constants used by failover_path.c's delay path. */
 #ifndef HZ
 #define HZ 1000UL

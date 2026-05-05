@@ -98,7 +98,7 @@ LDLIBS := $(CHECK_LIBS) -lpthread
 # ---------------------------------------------------------------------
 
 TESTS := test_enfs_roundrobin test_enfs_multipath_parse test_loadbalance_simulator \
-         test_pm_state test_failover_path test_enfs_path \
+         test_pm_state test_failover_path test_enfs_path test_failover_time \
          test_esunrpc_timer test_esunrpc_addr test_esunrpc_xdr
 # test_esunrpc_xprtmultipath: needs more shim work (kobject, full
 # rpc_xprt, RPC_DISPLAY_*, idr); test source kept on disk, suite
@@ -140,6 +140,12 @@ STUBS_test_failover_path    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/failover
 # enfs_path: tiny xprt-context lifecycle (alloc + free).
 ENFS_SRC_test_enfs_path := $(ENFS_SRC_ROOT)/enfs_path.c
 STUBS_test_enfs_path    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_path_stubs.c
+
+# failover_time: per-RPC timeout clamping. Three short functions
+# that interact with rpc_clnt->cl_timeout, ktime, and jiffies.
+ENFS_SRC_test_failover_time := $(ENFS_SRC_ROOT)/failover_time.c
+STUBS_test_failover_time    := $(STUBS_DIR)/kernel_stubs.c \
+                                $(STUBS_DIR)/failover_time_stubs.c
 
 # esunrpc_timer: Van Jacobson RTT estimator from the esunrpc fork.
 # First test target to compile a vendor/esunrpc/ source — exercises
