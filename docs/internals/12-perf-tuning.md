@@ -361,14 +361,80 @@ performance and can ride into a future PR.)
 
 ## 12.5 Tier 3 — enfs structural changes
 
-(populated after implementation + benchmark, only if Tiers 1+2
-don't close enough of the gap)
+### 12.5.1 Per-CPU cursor — DEFERRED
 
-### 12.5.1 Per-CPU cursor
+**Hypothesis:** the single `xpi_cursor` in `rpc_xprt_iter` is a
+contended cacheline at high stream counts; each dispatch does an
+`smp_load_acquire` + `smp_store_release` on it. Under N parallel
+fio jobs, every dispatch ping-pongs that cacheline across N CPUs.
+Per-CPU cursor would let each CPU advance independently with no
+inter-CPU traffic.
+
+**Why we're not implementing it now:**
+
+The Tier 2 measurement at 64 streams is the regime where this would
+help most, but at 64 streams enfs is already at **5486 MB/s**, and
+DPC's 64-stream ceiling is ~16000 MB/s. The remaining gap (3×) isn't
+explained by cacheline contention — at 5.4 GB/s on 16 transports,
+each transport is moving ~340 MB/s, well below saturation, with the
+limit being **per-transport stock-NFS throughput**, not multipath
+dispatch overhead.
+
+A back-of-envelope: at 64 streams × ~3 ms per RPC × 1 MiB per RPC,
+each stream contributes ~330 MB/s. 64 × 330 = 21 GB/s aggregate IF
+the streams were perfectly independent — but they share 16 TCP
+transports, so each transport carries 4 streams ≈ ~1.3 GB/s, and
+that matches what we measure (5.4/16 ≈ 340 per transport).
+
+In other words: **the dispatch path is not the 16-transport
+bottleneck.** The transport is. Per-CPU cursor would shave
+microseconds off a path that is dominated by milliseconds of
+RPC RTT. Theoretically interesting; in practice negligible on this
+hardware.
+
+**When this would matter:** workload that issues many cheap RPCs
+per second from many CPUs simultaneously — small-block buffered
+writes with `iodepth>1`, or NFS-over-RDMA where RPC RTT collapses
+to microseconds and dispatch overhead becomes the limit. Neither
+applies here.
+
+**Filed as [#30](https://github.com/darrenstarr/huaweienfs/issues/30)**
+for revisit if/when the workload profile changes. The change is
+~50 LOC and well-localised in `enfs_roundrobin.c` + the iter struct
+in `xprtmultipath.h`.
+
+### 12.5.2 Other deferred structural ideas
+
+- **Pipelined RPC dispatch (RPC pipelining within one xprt):** would
+  remove the synchronous-1-RPC-in-flight-per-task ceiling in §12.2.3
+  (330–400 IOPS regardless of block size). Largest single lever for
+  single-stream throughput. Big change — touches sunrpc, not
+  enfs. Filed as [#31](https://github.com/darrenstarr/huaweienfs/issues/31).
+- **NFS-over-RDMA / RoCE transport:** would shrink RPC RTT from ~3
+  ms to single-digit µs. The actual reason DPC achieves its
+  numbers; not implementable inside enfs.ko. Out of scope for this
+  project.
 
 ## 12.6 Recommendations
 
-(populated last, summarising what worked)
+Based on Tier 1 and Tier 2 measurements (Tier 3 deferred per §12.5.1):
+
+1. **Ship Tier 2 (pure round-robin) — merge `feat/perf-tuning`.**
+   Real +12% on 1M writes at low/mid stream counts; no regression
+   anywhere attributable to the change; simpler code; removes
+   hot-path atomic reads. Net positive.
+2. **Don't bother tuning sysctls** for this workload on this
+   storage (Tier 1 noise-only). The default Ubuntu autotune is fine;
+   the OceanStor caps rsize at 1M anyway.
+3. **For users chasing single-stream throughput**, the recommendation
+   is *parallelism not tuning*. Tier 2 hits 5.4 GB/s at 64 streams
+   from 70 MB/s at 1 stream — 77× speedup. The lever isn't in the
+   client tunables; it's in how you structure the workload.
+4. **Don't compare enfs single-stream to DPC single-stream as a
+   meaningful metric.** DPC has a fundamentally different transport
+   (RDMA/pipelined). The fair comparison is aggregate throughput at
+   the workload's actual concurrency — and enfs reaches ~33% of
+   DPC's parallel ceiling, which is a much closer race.
 
 ## 12.7 Reproducing this
 
