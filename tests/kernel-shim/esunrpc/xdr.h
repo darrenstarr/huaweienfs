@@ -92,6 +92,12 @@ extern __be32 *esunrpc_xdr_encode_netobj(__be32 *p,
  * returned __be32 *). */
 extern __be32 *xdr_encode_array(__be32 *p, const void *src, unsigned int n);
 
+/* xdr_align_size / xdr_pad_size — round-up-to-4 helpers. Real
+ * header has them as static inlines; mirror them so tests can
+ * call them directly. */
+static inline size_t xdr_align_size(size_t n) { return (n + 3) & ~(size_t)3; }
+static inline size_t xdr_pad_size(size_t n)   { return xdr_align_size(n) - n; }
+
 /* 64-bit hyper encode/decode. Real header has these as static
  * inlines; mirror them so tests can call them directly. */
 static inline __be32 *xdr_encode_hyper(__be32 *p, __u64 val)

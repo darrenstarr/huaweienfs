@@ -710,6 +710,88 @@ START_TEST(reserve_eightybyte_chunks) {
 } END_TEST
 
 /* ============================================================ */
+/* xdr_align_size / xdr_pad_size — pure 4-byte alignment math.  */
+/* ============================================================ */
+
+#define ALIGN_SIZE_TEST(name, in, expected) \
+    START_TEST(name) { \
+        ck_assert_uint_eq(xdr_align_size((in)), (expected)); \
+    } END_TEST
+
+ALIGN_SIZE_TEST(align_0,    0,    0)
+ALIGN_SIZE_TEST(align_1,    1,    4)
+ALIGN_SIZE_TEST(align_2,    2,    4)
+ALIGN_SIZE_TEST(align_3,    3,    4)
+ALIGN_SIZE_TEST(align_4,    4,    4)
+ALIGN_SIZE_TEST(align_5,    5,    8)
+ALIGN_SIZE_TEST(align_6,    6,    8)
+ALIGN_SIZE_TEST(align_7,    7,    8)
+ALIGN_SIZE_TEST(align_8,    8,    8)
+ALIGN_SIZE_TEST(align_9,    9,   12)
+ALIGN_SIZE_TEST(align_15,  15,   16)
+ALIGN_SIZE_TEST(align_16,  16,   16)
+ALIGN_SIZE_TEST(align_17,  17,   20)
+ALIGN_SIZE_TEST(align_31,  31,   32)
+ALIGN_SIZE_TEST(align_32,  32,   32)
+ALIGN_SIZE_TEST(align_33,  33,   36)
+ALIGN_SIZE_TEST(align_63,  63,   64)
+ALIGN_SIZE_TEST(align_64,  64,   64)
+ALIGN_SIZE_TEST(align_65,  65,   68)
+ALIGN_SIZE_TEST(align_127,127,  128)
+ALIGN_SIZE_TEST(align_128,128,  128)
+ALIGN_SIZE_TEST(align_129,129,  132)
+ALIGN_SIZE_TEST(align_255,255,  256)
+ALIGN_SIZE_TEST(align_256,256,  256)
+ALIGN_SIZE_TEST(align_257,257,  260)
+ALIGN_SIZE_TEST(align_1023,1023,1024)
+ALIGN_SIZE_TEST(align_1024,1024,1024)
+ALIGN_SIZE_TEST(align_1025,1025,1028)
+ALIGN_SIZE_TEST(align_4095,4095,4096)
+ALIGN_SIZE_TEST(align_4096,4096,4096)
+ALIGN_SIZE_TEST(align_4097,4097,4100)
+
+#define PAD_SIZE_TEST(name, in, expected) \
+    START_TEST(name) { \
+        ck_assert_uint_eq(xdr_pad_size((in)), (expected)); \
+    } END_TEST
+
+PAD_SIZE_TEST(pad_0,    0,   0)
+PAD_SIZE_TEST(pad_1,    1,   3)
+PAD_SIZE_TEST(pad_2,    2,   2)
+PAD_SIZE_TEST(pad_3,    3,   1)
+PAD_SIZE_TEST(pad_4,    4,   0)
+PAD_SIZE_TEST(pad_5,    5,   3)
+PAD_SIZE_TEST(pad_6,    6,   2)
+PAD_SIZE_TEST(pad_7,    7,   1)
+PAD_SIZE_TEST(pad_8,    8,   0)
+PAD_SIZE_TEST(pad_9,    9,   3)
+PAD_SIZE_TEST(pad_15,  15,   1)
+PAD_SIZE_TEST(pad_16,  16,   0)
+PAD_SIZE_TEST(pad_17,  17,   3)
+PAD_SIZE_TEST(pad_127,127,   1)
+PAD_SIZE_TEST(pad_128,128,   0)
+PAD_SIZE_TEST(pad_129,129,   3)
+PAD_SIZE_TEST(pad_255,255,   1)
+PAD_SIZE_TEST(pad_256,256,   0)
+PAD_SIZE_TEST(pad_257,257,   3)
+PAD_SIZE_TEST(pad_1023,1023, 1)
+PAD_SIZE_TEST(pad_1024,1024, 0)
+PAD_SIZE_TEST(pad_1025,1025, 3)
+PAD_SIZE_TEST(pad_4095,4095, 1)
+PAD_SIZE_TEST(pad_4096,4096, 0)
+PAD_SIZE_TEST(pad_4097,4097, 3)
+
+/* xdr_align_size + xdr_pad_size always sum to next-multiple-of-4. */
+START_TEST(align_pad_invariant_sweep) {
+    for (size_t n = 0; n <= 4096; n++) {
+        size_t aligned = xdr_align_size(n);
+        size_t pad     = xdr_pad_size(n);
+        ck_assert_uint_eq(aligned, n + pad);
+        ck_assert_uint_eq(aligned & 3, 0);
+    }
+} END_TEST
+
+/* ============================================================ */
 /* xdr_buf_pagecount — count of pages a buf spans, accounting   */
 /* for page_base and page_len. Pure arithmetic; no actual       */
 /* page allocations needed.                                      */
@@ -1333,6 +1415,69 @@ static Suite *esunrpc_xdr_suite(void)
     tcase_add_test(t15, reserve_many_4byte_chunks);
     tcase_add_test(t15, reserve_eightybyte_chunks);
     suite_add_tcase(s, t15);
+
+    TCase *t21 = tcase_create("align_size");
+    tcase_add_test(t21, align_0);
+    tcase_add_test(t21, align_1);
+    tcase_add_test(t21, align_2);
+    tcase_add_test(t21, align_3);
+    tcase_add_test(t21, align_4);
+    tcase_add_test(t21, align_5);
+    tcase_add_test(t21, align_6);
+    tcase_add_test(t21, align_7);
+    tcase_add_test(t21, align_8);
+    tcase_add_test(t21, align_9);
+    tcase_add_test(t21, align_15);
+    tcase_add_test(t21, align_16);
+    tcase_add_test(t21, align_17);
+    tcase_add_test(t21, align_31);
+    tcase_add_test(t21, align_32);
+    tcase_add_test(t21, align_33);
+    tcase_add_test(t21, align_63);
+    tcase_add_test(t21, align_64);
+    tcase_add_test(t21, align_65);
+    tcase_add_test(t21, align_127);
+    tcase_add_test(t21, align_128);
+    tcase_add_test(t21, align_129);
+    tcase_add_test(t21, align_255);
+    tcase_add_test(t21, align_256);
+    tcase_add_test(t21, align_257);
+    tcase_add_test(t21, align_1023);
+    tcase_add_test(t21, align_1024);
+    tcase_add_test(t21, align_1025);
+    tcase_add_test(t21, align_4095);
+    tcase_add_test(t21, align_4096);
+    tcase_add_test(t21, align_4097);
+    suite_add_tcase(s, t21);
+
+    TCase *t22 = tcase_create("pad_size");
+    tcase_add_test(t22, pad_0);
+    tcase_add_test(t22, pad_1);
+    tcase_add_test(t22, pad_2);
+    tcase_add_test(t22, pad_3);
+    tcase_add_test(t22, pad_4);
+    tcase_add_test(t22, pad_5);
+    tcase_add_test(t22, pad_6);
+    tcase_add_test(t22, pad_7);
+    tcase_add_test(t22, pad_8);
+    tcase_add_test(t22, pad_9);
+    tcase_add_test(t22, pad_15);
+    tcase_add_test(t22, pad_16);
+    tcase_add_test(t22, pad_17);
+    tcase_add_test(t22, pad_127);
+    tcase_add_test(t22, pad_128);
+    tcase_add_test(t22, pad_129);
+    tcase_add_test(t22, pad_255);
+    tcase_add_test(t22, pad_256);
+    tcase_add_test(t22, pad_257);
+    tcase_add_test(t22, pad_1023);
+    tcase_add_test(t22, pad_1024);
+    tcase_add_test(t22, pad_1025);
+    tcase_add_test(t22, pad_4095);
+    tcase_add_test(t22, pad_4096);
+    tcase_add_test(t22, pad_4097);
+    tcase_add_test(t22, align_pad_invariant_sweep);
+    suite_add_tcase(s, t22);
 
     TCase *t20 = tcase_create("xdr_buf_pagecount");
     tcase_add_test(t20, pagecount_zero_page_len_returns_zero);

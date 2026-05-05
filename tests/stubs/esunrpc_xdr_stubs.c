@@ -84,10 +84,10 @@ void xdr_reset_scratch_buffer(struct xdr_stream *xdr) { (void)xdr; }
 void xdr_set_scratch_buffer(struct xdr_stream *xdr, void *p, unsigned int n)
 { (void)xdr; (void)p; (void)n; }
 void xdr_commit_encode(struct xdr_stream *xdr) { (void)xdr; }
-unsigned int xdr_align_size(unsigned int n) { return (n + 3) & ~3; }
+/* xdr_align_size / xdr_pad_size now live as static inlines in the
+ * shim header (tests/kernel-shim/esunrpc/xdr.h). */
 unsigned int xdr_stream_remaining(const struct xdr_stream *xdr)
 { (void)xdr; return 0; }
-unsigned int xdr_pad_size(unsigned int n) { return (4 - (n & 3)) & 3; }
 int PageHighMem(struct page *p) { (void)p; return 0; }
 
 /* xdr_buf_subsegment / xdr_buf_unwrap variants. */
