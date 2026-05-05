@@ -710,6 +710,88 @@ START_TEST(reserve_eightybyte_chunks) {
 } END_TEST
 
 /* ============================================================ */
+/* xdr_buf_pagecount — count of pages a buf spans, accounting   */
+/* for page_base and page_len. Pure arithmetic; no actual       */
+/* page allocations needed.                                      */
+/* ============================================================ */
+
+extern size_t xdr_buf_pagecount(const struct xdr_buf *buf);
+
+#define PAGE_SIZE_TEST 4096
+
+START_TEST(pagecount_zero_page_len_returns_zero) {
+    struct xdr_buf b = {0};
+    b.page_len = 0;
+    ck_assert_uint_eq(xdr_buf_pagecount(&b), 0);
+} END_TEST
+
+START_TEST(pagecount_one_byte_page_len_returns_one) {
+    struct xdr_buf b = {0};
+    b.page_len = 1; b.page_base = 0;
+    ck_assert_uint_eq(xdr_buf_pagecount(&b), 1);
+} END_TEST
+
+START_TEST(pagecount_full_page_returns_one) {
+    struct xdr_buf b = {0};
+    b.page_len = PAGE_SIZE_TEST; b.page_base = 0;
+    ck_assert_uint_eq(xdr_buf_pagecount(&b), 1);
+} END_TEST
+
+START_TEST(pagecount_one_byte_over_page_returns_two) {
+    struct xdr_buf b = {0};
+    b.page_len = PAGE_SIZE_TEST + 1; b.page_base = 0;
+    ck_assert_uint_eq(xdr_buf_pagecount(&b), 2);
+} END_TEST
+
+START_TEST(pagecount_eight_pages_exact) {
+    struct xdr_buf b = {0};
+    b.page_len = 8 * PAGE_SIZE_TEST; b.page_base = 0;
+    ck_assert_uint_eq(xdr_buf_pagecount(&b), 8);
+} END_TEST
+
+START_TEST(pagecount_with_page_base_carries_over) {
+    /* A buf starting partway into a page has more pages than its
+     * page_len/PAGE_SIZE alone would suggest. */
+    struct xdr_buf b = {0};
+    b.page_base = PAGE_SIZE_TEST - 1; b.page_len = 2;
+    ck_assert_uint_eq(xdr_buf_pagecount(&b), 2);
+} END_TEST
+
+START_TEST(pagecount_page_base_aligned) {
+    struct xdr_buf b = {0};
+    b.page_base = 100; b.page_len = PAGE_SIZE_TEST - 100;
+    /* page_base + page_len = PAGE_SIZE → 1 page. */
+    ck_assert_uint_eq(xdr_buf_pagecount(&b), 1);
+} END_TEST
+
+#define PAGECOUNT_PARAM(name, base, length, expected) \
+    START_TEST(name) { \
+        struct xdr_buf b = {0}; \
+        b.page_base = (base); b.page_len = (length); \
+        ck_assert_uint_eq(xdr_buf_pagecount(&b), (expected)); \
+    } END_TEST
+
+PAGECOUNT_PARAM(pc_p_a,    0,         0,         0)
+PAGECOUNT_PARAM(pc_p_b,    0,         1,         1)
+PAGECOUNT_PARAM(pc_p_c,    0,      4095,         1)
+PAGECOUNT_PARAM(pc_p_d,    0,      4096,         1)
+PAGECOUNT_PARAM(pc_p_e,    0,      4097,         2)
+PAGECOUNT_PARAM(pc_p_f,    0,      8191,         2)
+PAGECOUNT_PARAM(pc_p_g,    0,      8192,         2)
+PAGECOUNT_PARAM(pc_p_h,    0,      8193,         3)
+PAGECOUNT_PARAM(pc_p_i,    1,      4095,         1)
+PAGECOUNT_PARAM(pc_p_j,    1,      4096,         2)
+PAGECOUNT_PARAM(pc_p_k,    100,    1000,         1)
+PAGECOUNT_PARAM(pc_p_l,    100, 4096-100,        1)
+PAGECOUNT_PARAM(pc_p_m,    100, 4096-99,         2)
+PAGECOUNT_PARAM(pc_p_n,    4095,      1,         1)
+PAGECOUNT_PARAM(pc_p_o,    4095,      2,         2)
+PAGECOUNT_PARAM(pc_p_p,    0,    65536,         16)
+PAGECOUNT_PARAM(pc_p_q,    0,   65537,         17)
+PAGECOUNT_PARAM(pc_p_r,    0,  4096*100,       100)
+PAGECOUNT_PARAM(pc_p_s,    0,  4096*1024,     1024)
+
+/* ============================================================ */
 /* esunrpc_xdr_restrict_buflen — shrink the writable end of the */
 /* xdr_buf. Returns -1 if shrinking past current data, 0 if no  */
 /* change needed, 0 + adjusts xdr->end if shrinking within.     */
@@ -1251,6 +1333,35 @@ static Suite *esunrpc_xdr_suite(void)
     tcase_add_test(t15, reserve_many_4byte_chunks);
     tcase_add_test(t15, reserve_eightybyte_chunks);
     suite_add_tcase(s, t15);
+
+    TCase *t20 = tcase_create("xdr_buf_pagecount");
+    tcase_add_test(t20, pagecount_zero_page_len_returns_zero);
+    tcase_add_test(t20, pagecount_one_byte_page_len_returns_one);
+    tcase_add_test(t20, pagecount_full_page_returns_one);
+    tcase_add_test(t20, pagecount_one_byte_over_page_returns_two);
+    tcase_add_test(t20, pagecount_eight_pages_exact);
+    tcase_add_test(t20, pagecount_with_page_base_carries_over);
+    tcase_add_test(t20, pagecount_page_base_aligned);
+    tcase_add_test(t20, pc_p_a);
+    tcase_add_test(t20, pc_p_b);
+    tcase_add_test(t20, pc_p_c);
+    tcase_add_test(t20, pc_p_d);
+    tcase_add_test(t20, pc_p_e);
+    tcase_add_test(t20, pc_p_f);
+    tcase_add_test(t20, pc_p_g);
+    tcase_add_test(t20, pc_p_h);
+    tcase_add_test(t20, pc_p_i);
+    tcase_add_test(t20, pc_p_j);
+    tcase_add_test(t20, pc_p_k);
+    tcase_add_test(t20, pc_p_l);
+    tcase_add_test(t20, pc_p_m);
+    tcase_add_test(t20, pc_p_n);
+    tcase_add_test(t20, pc_p_o);
+    tcase_add_test(t20, pc_p_p);
+    tcase_add_test(t20, pc_p_q);
+    tcase_add_test(t20, pc_p_r);
+    tcase_add_test(t20, pc_p_s);
+    suite_add_tcase(s, t20);
 
     TCase *t16 = tcase_create("restrict_buflen");
     tcase_add_test(t16, restrict_buflen_negative_returns_minus_one);
