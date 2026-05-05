@@ -29,10 +29,11 @@ TARGET := ubuntu-7.0
 endif
 endif
 
-UBUNTU_VENDOR_DIR := $(CURDIR)/vendor/$(TARGET)
-OE_VENDOR_DIR     := $(CURDIR)/vendor/openeuler
-PATCHES_DIR       := $(CURDIR)/patches/$(TARGET)
-COMPAT_DIR        := $(CURDIR)/compat
+UBUNTU_VENDOR_DIR  := $(CURDIR)/vendor/$(TARGET)
+OE_VENDOR_DIR      := $(CURDIR)/vendor/openeuler
+ESUNRPC_VENDOR_DIR := $(CURDIR)/vendor/esunrpc
+PATCHES_DIR        := $(CURDIR)/patches/$(TARGET)
+COMPAT_DIR         := $(CURDIR)/compat
 # VM_HOST and VM_PATH are intentionally unset by default — set them in
 # your shell, in secrets/local-env.sh (gitignored), or on the command
 # line, e.g.:
@@ -84,6 +85,7 @@ port: fetch-vendor
 	@scripts/build-src-tree.sh \
 	    "$(UBUNTU_VENDOR_DIR)" \
 	    "$(OE_VENDOR_DIR)" \
+	    "$(ESUNRPC_VENDOR_DIR)" \
 	    "$(PATCHES_DIR)" \
 	    "$(COMPAT_DIR)" \
 	    "$(SRC_DIR)"
@@ -100,10 +102,21 @@ test:
 test-clean:
 	$(MAKE) -C tests clean
 
-.PHONY: manpage
-manpage: docs/man/enfs.7
+.PHONY: manpage manpages-esunrpc
+manpage: docs/man/enfs.7 manpages-esunrpc
 
 docs/man/enfs.7: docs/man/enfs.7.md
+	pandoc -s -t man $< -o $@
+
+# esunrpc man pages — one per public function, generated from the
+# hand-written markdown sources via pandoc. Iterates the .md sources
+# so adding a new manual page is just `git add docs/man/<name>.<sect>.md`.
+ESUNRPC_MAN_MD := $(wildcard docs/man/esunrpc*.md)
+ESUNRPC_MAN    := $(patsubst %.md,%,$(ESUNRPC_MAN_MD))
+
+manpages-esunrpc: $(ESUNRPC_MAN)
+
+docs/man/esunrpc%: docs/man/esunrpc%.md
 	pandoc -s -t man $< -o $@
 
 .PHONY: clean

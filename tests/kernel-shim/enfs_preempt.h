@@ -71,6 +71,217 @@ static inline bool enfs_is_path_connected(enum enfs_path_state state) {
     return state == PM_STATE_NORMAL || state == PM_STATE_UNSTABLE;
 }
 
+/* From pm_state.h — declarations so SUTs that call these (eg
+ * failover_path.c calls pm_set_path_state) compile. The stubs
+ * provide the implementation. */
+struct rpc_xprt;
+enum enfs_path_state pm_get_path_state(struct rpc_xprt *xprt);
+void pm_set_path_state(struct rpc_xprt *xprt, enum enfs_path_state state);
+void pm_get_path_state_desc(struct rpc_xprt *xprt, char *buf, int len);
+void pm_get_xprt_state_desc(struct rpc_xprt *xprt, char *buf, int len);
+
+/* RPC program numbers — stand-ins for what <linux/nfs.h> et al would
+ * provide. Preempted include guards prevent the real headers from
+ * defining these. */
+#ifndef NFS_PROGRAM
+#define NFS_PROGRAM     100003
+#endif
+#ifndef NFS3_VERSION
+#define NFS3_VERSION    3
+#endif
+#ifndef NFS4_MINOR_VERSION
+#define NFS4_MINOR_VERSION 0
+#endif
+
+/* NFSv4 client-side procedure stat indices, used by
+ * failover_path.c's switch statement. Real values in
+ * <linux/nfs4.h> (preempted). */
+enum {
+    NFSPROC4_CLNT_NULL = 0,
+    NFSPROC4_CLNT_READ,
+    NFSPROC4_CLNT_WRITE,
+    NFSPROC4_CLNT_COMMIT,
+    NFSPROC4_CLNT_OPEN,
+    NFSPROC4_CLNT_OPEN_CONFIRM,
+    NFSPROC4_CLNT_OPEN_NOATTR,
+    NFSPROC4_CLNT_OPEN_DOWNGRADE,
+    NFSPROC4_CLNT_CLOSE,
+    NFSPROC4_CLNT_SETATTR,
+    NFSPROC4_CLNT_FSINFO,
+    NFSPROC4_CLNT_RENEW,
+    NFSPROC4_CLNT_SETCLIENTID,
+    NFSPROC4_CLNT_SETCLIENTID_CONFIRM,
+    NFSPROC4_CLNT_LOCK,
+    NFSPROC4_CLNT_LOCKT,
+    NFSPROC4_CLNT_LOCKU,
+    NFSPROC4_CLNT_ACCESS,
+    NFSPROC4_CLNT_GETATTR,
+    NFSPROC4_CLNT_LOOKUP,
+    NFSPROC4_CLNT_LOOKUP_ROOT,
+    NFSPROC4_CLNT_REMOVE,
+    NFSPROC4_CLNT_RENAME,
+    NFSPROC4_CLNT_LINK,
+    NFSPROC4_CLNT_SYMLINK,
+    NFSPROC4_CLNT_CREATE,
+    NFSPROC4_CLNT_PATHCONF,
+    NFSPROC4_CLNT_STATFS,
+    NFSPROC4_CLNT_READLINK,
+    NFSPROC4_CLNT_READDIR,
+    NFSPROC4_CLNT_SERVER_CAPS,
+    NFSPROC4_CLNT_DELEGRETURN,
+    NFSPROC4_CLNT_GETACL,
+    NFSPROC4_CLNT_SETACL,
+};
+
+/* NFSv3 procedure numbers — wire values from RFC 1813. Real values
+ * in <linux/nfs3.h> (preempted). */
+#define NFS3PROC_NULL         0
+#define NFS3PROC_GETATTR      1
+#define NFS3PROC_SETATTR      2
+#define NFS3PROC_LOOKUP       3
+#define NFS3PROC_ACCESS       4
+#define NFS3PROC_READLINK     5
+#define NFS3PROC_READ         6
+#define NFS3PROC_WRITE        7
+#define NFS3PROC_CREATE       8
+#define NFS3PROC_MKDIR        9
+#define NFS3PROC_SYMLINK      10
+#define NFS3PROC_MKNOD        11
+#define NFS3PROC_REMOVE       12
+#define NFS3PROC_RMDIR        13
+#define NFS3PROC_RENAME       14
+#define NFS3PROC_LINK         15
+#define NFS3PROC_READDIR      16
+#define NFS3PROC_READDIRPLUS  17
+#define NFS3PROC_FSSTAT       18
+#define NFS3PROC_FSINFO       19
+#define NFS3PROC_PATHCONF     20
+#define NFS3PROC_COMMIT       21
+
+/* enfs config knobs that the SUT switches on. */
+#ifndef ENFS_MULTIPATH_ENABLE
+#define ENFS_MULTIPATH_ENABLE 1
+#endif
+
+/* jiffies — controllable from tests via failover_time stubs. */
+extern unsigned long jiffies;
+
+/* Misc kernel constants used by failover_path.c's delay path. */
+#ifndef HZ
+#define HZ 1000UL
+#endif
+#ifndef MSEC_PER_SEC
+#define MSEC_PER_SEC 1000UL
+#endif
+#ifndef ETIMEDOUT
+#define ETIMEDOUT 110
+#endif
+#ifndef NFS3_OK
+#define NFS3_OK 0
+#endif
+
+/* String / number parsers used by addr.c et al. Real kernel pulls
+ * these in via <linux/kstrtox.h>; we declare here for SUTs that
+ * don't include it directly. */
+int kstrtou8(const char *s, unsigned int base, unsigned char *out);
+unsigned int kstrtouint(const char *s, unsigned int base, unsigned int *out);
+char *kstrdup(const char *s, unsigned int gfp);
+size_t strlcat(char *dst, const char *src, size_t size);
+
+/* IP-address parsers from <linux/inet.h>. */
+int in4_pton(const char *src, int srclen, unsigned char *dst,
+             int delim, const char **end);
+int in6_pton(const char *src, int srclen, unsigned char *dst,
+             int delim, const char **end);
+
+/* Maximum lengths from <linux/inet.h>. */
+#ifndef INET_ADDRSTRLEN
+#define INET_ADDRSTRLEN  16
+#endif
+#ifndef INET6_ADDRSTRLEN
+#define INET6_ADDRSTRLEN 48
+#endif
+
+/* IS_ENABLED(): kernel macro that resolves to 1 iff CONFIG_X is
+ * defined (to either 1 or m). For tests we always want the IPv6
+ * paths active. */
+#ifndef CONFIG_IPV6
+#define CONFIG_IPV6 1
+#endif
+#ifndef IS_ENABLED
+#define __ARG_PLACEHOLDER_1 0,
+#define ___is_defined(arg1_or_junk)  __take_second_arg(arg1_or_junk 1, 0)
+#define __take_second_arg(__ignored, val, ...) val
+#define __is_defined(x) ___is_defined(__ARG_PLACEHOLDER_##x)
+#define IS_ENABLED(option) __is_defined(option)
+#endif
+
+/* IPv6 scope-id constants from <net/ipv6.h>. Tests don't drive
+ * the scope-id branches of addr.c (those need real netdev infra),
+ * but the SUT still needs the constants to compile. */
+#ifndef IPV6_SCOPE_ID_LEN
+#define IPV6_SCOPE_ID_LEN 16
+#endif
+#ifndef IPV6_SCOPE_DELIMITER
+#define IPV6_SCOPE_DELIMITER '%'
+#endif
+
+/* Override snprintf so kernel-only %pI4 / %pI6 / %pI6c format
+ * specifiers (used by sunrpc/addr.c et al.) work in userspace.
+ * Implementation in tests/stubs/kernel_stubs.c. */
+#include <stddef.h>
+int enfs_test_snprintf(char *buf, size_t size, const char *fmt, ...);
+#ifndef ENFS_KERNEL_STUBS_INTERNAL
+#define snprintf enfs_test_snprintf
+#endif
+
+/* Misc kernel keywords + macros that some SUTs need but the shim
+ * tree doesn't otherwise provide. */
+#ifndef noinline
+#define noinline __attribute__((noinline))
+#endif
+#ifndef __maybe_unused
+#define __maybe_unused __attribute__((unused))
+#endif
+#ifndef __always_inline
+#define __always_inline inline __attribute__((always_inline))
+#endif
+#ifndef struct_size
+#define struct_size(p, member, n) (sizeof(*(p)) + sizeof((p)->member[0]) * (n))
+#endif
+
+/* Kernel min/max helpers used in xdr.c. */
+#ifndef min_t
+#define min_t(t, x, y) ({ t _x = (x); t _y = (y); _x < _y ? _x : _y; })
+#endif
+#ifndef max_t
+#define max_t(t, x, y) ({ t _x = (x); t _y = (y); _x > _y ? _x : _y; })
+#endif
+#ifndef min
+#define min(x, y) ({ typeof(x) _x = (x); typeof(y) _y = (y); _x < _y ? _x : _y; })
+#endif
+#ifndef max
+#define max(x, y) ({ typeof(x) _x = (x); typeof(y) _y = (y); _x > _y ? _x : _y; })
+#endif
+
+/* xdr.c uses bvec_set_page; stub. */
+struct bio_vec;
+struct page;
+static inline void bvec_set_page(struct bio_vec *bv, struct page *p,
+                                  unsigned int len, unsigned int off)
+{ (void)bv; (void)p; (void)len; (void)off; }
+
+/* scatterlist forward decl + RPC auth max size; xdr.c uses these
+ * in code paths the tests don't exercise. */
+struct scatterlist {
+    unsigned long page_link;
+    unsigned int  offset;
+    unsigned int  length;
+};
+#ifndef RPC_MAX_AUTH_SIZE
+#define RPC_MAX_AUTH_SIZE 400
+#endif
+
 /* Forward decl for things below */
 struct rpc_xprt;
 struct rpc_clnt;
@@ -82,6 +293,10 @@ struct rpc_task;
 struct enfs_xprt_context {
     atomic_long_t queuelen;
     bool          main;
+    atomic_t      path_state;     /* used by pm_state.c */
+    struct sockaddr_storage srcaddr; /* used by pm_state.c diagnostics */
+    int           protocol;       /* IPPROTO_TCP/UDP — diagnostics only */
+    void         *stats;          /* opaque iostats pointer */
     /* Tests don't currently inspect any other field. Extend if
      * needed. */
 };

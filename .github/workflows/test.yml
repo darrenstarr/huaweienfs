@@ -7,7 +7,12 @@ on:
     branches: [main]
 
 permissions:
+  # contents: needed to check out
+  # checks: needed by dorny/test-reporter to publish a Check run
+  # pull-requests: needed to post a comment with the test summary
   contents: read
+  checks: write
+  pull-requests: write
 
 jobs:
   userspace-unit-tests:
@@ -24,7 +29,9 @@ jobs:
             check \
             libsubunit-dev \
             pkg-config \
-            curl
+            curl \
+            bc \
+            lcov
 
       # Cache the upstream Linux header fetch keyed on the pinned tag
       # in tests/UPSTREAM-REVISION. Cache hit = ~0s; miss = a few
@@ -35,5 +42,86 @@ jobs:
           path: ~/.cache/enfs-tests-headers
           key: enfs-tests-headers-${{ hashFiles('tests/UPSTREAM-REVISION', 'tests/LINUX-HEADERS-MANIFEST') }}
 
-      - name: Build and run userspace unit tests
-        run: make test
+      # Build with coverage instrumentation and run. The Makefile's
+      # `coverage` target builds with --coverage, runs the suite via
+      # `check` (which produces the JUnit XML reports), and then
+      # captures lcov output. The XML reports are emitted as a side
+      # effect of `check` regardless of whether coverage is on.
+      - name: Build and run userspace unit tests (with coverage)
+        run: |
+          set -e
+          make -C tests coverage
+          # Surface the per-suite totals in the run log
+          echo "::group::Test summary"
+          for f in tests/build/junit/*.xml; do
+            tests=$(sed -nE 's/.*tests="([0-9]+)".*/\1/p' "$f" | head -1)
+            failures=$(sed -nE 's/.*failures="([0-9]+)".*/\1/p' "$f" | head -1)
+            errors=$(sed -nE 's/.*errors="([0-9]+)".*/\1/p' "$f" | head -1)
+            printf "%-60s tests=%s failures=%s errors=%s\n" \
+              "$(basename "$f" .xml)" "${tests:-?}" "${failures:-?}" "${errors:-?}"
+          done
+          echo "::endgroup::"
+
+      # Render JUnit XMLs as a Check run so failures appear inline
+      # on the PR's Files-changed view.
+      - name: Publish JUnit test report
+        if: always()
+        uses: dorny/test-reporter@v2
+        with:
+          name: userspace unit tests
+          path: tests/build/junit/*.xml
+          reporter: java-junit
+          fail-on-error: false
+
+      # Always upload artifacts (XML, TAP, coverage HTML) so a failed
+      # run can be debugged from the run page even if the reporter
+      # action above is unavailable.
+      - name: Upload JUnit + TAP artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ github.run_id }}
+          path: |
+            tests/build/junit/*.xml
+            tests/build/junit/*.tap
+          retention-days: 30
+
+      - name: Upload coverage HTML artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html-${{ github.run_id }}
+          path: tests/build/coverage/
+          retention-days: 30
+
+      # Coverage summary: scrape the lcov totals into the workflow's
+      # GITHUB_STEP_SUMMARY (the markdown panel that appears on the
+      # job summary page).
+      - name: Post coverage summary to job summary
+        if: always()
+        run: |
+          set -e
+          {
+            echo "## Coverage summary"
+            echo
+            if [ -f tests/build/coverage/lcov.info ]; then
+              lcov --summary tests/build/coverage/lcov.info \
+                --rc lcov_branch_coverage=1 2>&1 \
+                | grep -E '(lines|functions|branches)\.+:' \
+                || echo "_lcov produced no summary lines_"
+            else
+              echo "_no lcov.info produced_"
+            fi
+            echo
+            echo "## Per-suite case counts"
+            echo
+            echo "| Suite | tests | failures | errors |"
+            echo "|---|---|---|---|"
+            for f in tests/build/junit/*.xml; do
+              s=$(basename "$f" .xml)
+              t=$(sed -nE 's/.*tests="([0-9]+)".*/\1/p' "$f" | head -1)
+              fa=$(sed -nE 's/.*failures="([0-9]+)".*/\1/p' "$f" | head -1)
+              er=$(sed -nE 's/.*errors="([0-9]+)".*/\1/p' "$f" | head -1)
+              echo "| $s | ${t:-?} | ${fa:-0} | ${er:-0} |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

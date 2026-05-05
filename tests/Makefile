@@ -24,7 +24,9 @@ HEADERS_DIR   := $(BUILD_DIR)/linux-headers
 SHIM_DIR      := $(CURDIR)/kernel-shim
 STUBS_DIR     := $(CURDIR)/stubs
 UNIT_DIR      := $(CURDIR)/unit
-ENFS_SRC_ROOT := $(ROOT)/vendor/openeuler/fs/nfs/enfs
+ENFS_SRC_ROOT     := $(ROOT)/vendor/openeuler/fs/nfs/enfs
+ESUNRPC_SRC_ROOT  := $(ROOT)/vendor/esunrpc/net/esunrpc
+ESUNRPC_INC_ROOT  := $(ROOT)/vendor/esunrpc/include
 
 # Compiler flags.
 #   -Dstatic=         expose `static` functions for direct testing
@@ -52,6 +54,8 @@ CFLAGS_COMMON := \
     -I $(SHIM_DIR) \
     -I $(HEADERS_DIR) \
     -I $(ENFS_SRC_ROOT) \
+    -I $(ESUNRPC_INC_ROOT) \
+    -I $(ESUNRPC_SRC_ROOT) \
     -Wall -Wno-unused-parameter -Wno-unused-function \
     -Wno-pointer-arith -Wno-pragmas -Wno-comment
 
@@ -93,10 +97,74 @@ LDLIBS := $(CHECK_LIBS) -lpthread
 # and defining ENFS_SRC_<name> and STUBS_<name>.
 # ---------------------------------------------------------------------
 
-TESTS := test_enfs_roundrobin test_enfs_multipath_parse
+TESTS := test_enfs_roundrobin test_enfs_multipath_parse test_loadbalance_simulator \
+         test_pm_state test_failover_path test_enfs_path test_failover_time \
+         test_esunrpc_timer test_esunrpc_addr test_esunrpc_xdr
+# test_esunrpc_xprtmultipath: needs more shim work (kobject, full
+# rpc_xprt, RPC_DISPLAY_*, idr); test source kept on disk, suite
+# TBD-enabled once shim is built out. Tracked as #44.
+
+# esunrpc_xdr: RFC 4506 XDR encode/decode primitives. Pure byte
+# manipulation; the tests only touch the linear (head[0]) segment
+# of xdr_buf so the page-helper stubs in esunrpc_xdr_stubs.c are
+# never reached.
+ENFS_SRC_test_esunrpc_xdr := $(ESUNRPC_SRC_ROOT)/xdr.c
+STUBS_test_esunrpc_xdr    := $(STUBS_DIR)/kernel_stubs.c \
+                              $(STUBS_DIR)/esunrpc_xdr_stubs.c
 
 ENFS_SRC_test_enfs_roundrobin := $(ENFS_SRC_ROOT)/enfs_roundrobin.c
 STUBS_test_enfs_roundrobin    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_deps_stubs.c
+
+# Load-balancing simulator. Reuses enfs_roundrobin.c as the source
+# under test (same dispatcher, same shim layer). The test asserts
+# workload-level distribution properties — over many dispatches each
+# healthy xprt carries its fair share — which the per-call tests in
+# test_enfs_roundrobin.c don't cover.
+ENFS_SRC_test_loadbalance_simulator := $(ENFS_SRC_ROOT)/enfs_roundrobin.c
+STUBS_test_loadbalance_simulator    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_deps_stubs.c
+
+# pm_state: state machine governing per-path eligibility. Pure logic,
+# small file (~216 LOC), perfect target for thorough coverage of every
+# state transition + error branch.
+ENFS_SRC_test_pm_state := $(ENFS_SRC_ROOT)/pm_state.c
+# Use a pm_state-specific stub set: the standard enfs_deps_stubs.c
+# defines pm_get_path_state which would collide with the SUT.
+STUBS_test_pm_state    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/pm_state_stubs.c
+
+# failover_path: per-procedure retry policy for v3 + v4. Static
+# functions exposed via -Dstatic=. Stubs out the few enfs-internal
+# helpers it calls (pm_ping_is_test_xprt_task, enfs_get_config_*).
+ENFS_SRC_test_failover_path := $(ENFS_SRC_ROOT)/failover_path.c
+STUBS_test_failover_path    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/failover_path_stubs.c
+
+# enfs_path: tiny xprt-context lifecycle (alloc + free).
+ENFS_SRC_test_enfs_path := $(ENFS_SRC_ROOT)/enfs_path.c
+STUBS_test_enfs_path    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_path_stubs.c
+
+# failover_time: per-RPC timeout clamping. Three short functions
+# that interact with rpc_clnt->cl_timeout, ktime, and jiffies.
+ENFS_SRC_test_failover_time := $(ENFS_SRC_ROOT)/failover_time.c
+STUBS_test_failover_time    := $(STUBS_DIR)/kernel_stubs.c \
+                                $(STUBS_DIR)/failover_time_stubs.c
+
+# esunrpc_timer: Van Jacobson RTT estimator from the esunrpc fork.
+# First test target to compile a vendor/esunrpc/ source — exercises
+# the tests/kernel-shim/esunrpc/ shim directory + asm/param.h shim.
+# No stubs needed beyond kernel_stubs (the file is pure math).
+ENFS_SRC_test_esunrpc_timer := $(ESUNRPC_SRC_ROOT)/timer.c
+STUBS_test_esunrpc_timer    := $(STUBS_DIR)/kernel_stubs.c
+
+# esunrpc_addr: presentation-form address conversion. Pure data
+# transformation; backed by the same in[46]_pton stubs as pm_state.
+ENFS_SRC_test_esunrpc_addr := $(ESUNRPC_SRC_ROOT)/addr.c
+STUBS_test_esunrpc_addr    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/esunrpc_addr_stubs.c
+
+# esunrpc_xprtmultipath: multipath transport switch + iter ops.
+# Drives the lifecycle: alloc, get/put, add/remove, set_roundrobin,
+# iter_init/destroy, get_next traversal.
+ENFS_SRC_test_esunrpc_xprtmultipath := $(ESUNRPC_SRC_ROOT)/xprtmultipath.c
+STUBS_test_esunrpc_xprtmultipath    := $(STUBS_DIR)/kernel_stubs.c \
+                                        $(STUBS_DIR)/esunrpc_xprtmultipath_stubs.c
 
 # Address-list parser. Covers BOTH IPv4 (the production target for
 # customer storage) and IPv6 (the project lab fabric). Uses libc-
@@ -117,18 +185,29 @@ STUBS_test_enfs_multipath_parse    := $(STUBS_DIR)/kernel_stubs.c \
 all: $(addprefix $(BUILD_DIR)/, $(TESTS))
 
 # `check` is the conventional GNU make name for "build + run tests".
+# Sets CK_XML_LOG_FILE per test so libcheck's SRunner emits a JUnit-
+# style XML report (consumed by tests/unit/check_runner.h's main()).
+# CI workflows pick those up as artifacts and render them via the
+# test-reporter action.
 check: all
 	@set -e; \
+	mkdir -p $(BUILD_DIR)/junit; \
 	failed=0; \
 	for t in $(TESTS); do \
 	    echo "=== running $$t ==="; \
+	    CK_XML_LOG_FILE=$(BUILD_DIR)/junit/$$t.xml \
+	    CK_TAP_LOG_FILE=$(BUILD_DIR)/junit/$$t.tap \
 	    $(BUILD_DIR)/$$t || failed=$$((failed+1)); \
 	done; \
 	if [ $$failed -gt 0 ]; then \
 	    echo "FAIL: $$failed test binary(ies) reported failures"; \
+	    echo "JUnit XML reports under $(BUILD_DIR)/junit/"; \
 	    exit 1; \
 	fi; \
-	echo "OK: all $(words $(TESTS)) test binary(ies) passed"
+	total=$$(grep -hc '<test ' $(BUILD_DIR)/junit/*.xml 2>/dev/null \
+	    | paste -sd+ - | bc); \
+	echo "OK: all $(words $(TESTS)) test binary(ies) passed ($$total individual cases)"; \
+	echo "JUnit XML reports under $(BUILD_DIR)/junit/"
 
 # Headers fetch. Idempotent — script no-ops on cache hit.
 fetch-headers: $(HEADERS_DIR)/.fetched

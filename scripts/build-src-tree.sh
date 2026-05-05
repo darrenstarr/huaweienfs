@@ -2,28 +2,34 @@
 # build-src-tree.sh - materialise src/ for Option B′.
 #
 # Usage: build-src-tree.sh <UBUNTU_VENDOR_DIR> <OE_VENDOR_DIR> \
-#                          <PATCHES_DIR> <COMPAT_DIR> <SRC_DIR>
+#                          <ESUNRPC_VENDOR_DIR> <PATCHES_DIR> \
+#                          <COMPAT_DIR> <SRC_DIR>
 #
 # Steps (all idempotent):
 #   1. Wipe SRC_DIR and recreate.
 #   2. Mirror UBUNTU_VENDOR_DIR/{fs,net,include} into SRC_DIR.
 #   3. Apply each patch in PATCHES_DIR/series, in order, with `patch -p1`.
 #   4. Drop in the OE-only "new" files (enfs/ subdir + adapter glue).
-#   5. Mirror COMPAT_DIR into SRC_DIR/compat/.
-#   6. Print one-line summary.
+#   5. Drop in the esunrpc fork (vendor/esunrpc/) into src/net/esunrpc/
+#      and src/include/esunrpc/. Independent of the legacy patched
+#      sunrpc; both stacks coexist in the build until the legacy is
+#      retired (PR 7 — see docs/internals/15-esunrpc-fork.md).
+#   6. Mirror COMPAT_DIR into SRC_DIR/compat/.
+#   7. Print one-line summary.
 
 set -euo pipefail
 
-if [[ $# -ne 5 ]]; then
-    echo "Usage: $(basename "$0") <UBUNTU_VENDOR_DIR> <OE_VENDOR_DIR> <PATCHES_DIR> <COMPAT_DIR> <SRC_DIR>" >&2
+if [[ $# -ne 6 ]]; then
+    echo "Usage: $(basename "$0") <UBUNTU_VENDOR_DIR> <OE_VENDOR_DIR> <ESUNRPC_VENDOR_DIR> <PATCHES_DIR> <COMPAT_DIR> <SRC_DIR>" >&2
     exit 2
 fi
 
 UBUNTU_VENDOR_DIR="$1"
 OE_VENDOR_DIR="$2"
-PATCHES_DIR="$3"
-COMPAT_DIR="$4"
-SRC_DIR="$5"
+ESUNRPC_VENDOR_DIR="$3"
+PATCHES_DIR="$4"
+COMPAT_DIR="$5"
+SRC_DIR="$6"
 
 log() { echo "[build-src-tree] $*"; }
 err() { echo "[build-src-tree] ERROR: $*" >&2; }
@@ -117,6 +123,17 @@ if [[ ! -f "$src" ]]; then
     exit 1
 fi
 cp "$src" "$SRC_DIR/include/linux/sunrpc/"
+
+# 4e. esunrpc fork — net/esunrpc/ + include/esunrpc/. Optional during
+# the transition; legacy stack still builds without it. See chapter 15.
+if [[ -d "$ESUNRPC_VENDOR_DIR/net/esunrpc" ]]; then
+    log "dropping in esunrpc fork from $ESUNRPC_VENDOR_DIR"
+    mkdir -p "$SRC_DIR/net" "$SRC_DIR/include"
+    cp -a "$ESUNRPC_VENDOR_DIR/net/esunrpc" "$SRC_DIR/net/"
+    cp -a "$ESUNRPC_VENDOR_DIR/include/esunrpc" "$SRC_DIR/include/"
+else
+    log "no esunrpc fork at $ESUNRPC_VENDOR_DIR (legacy-only build)"
+fi
 
 # 5. Mirror compat/ into SRC_DIR/compat/.
 log "mirroring compat headers from $COMPAT_DIR"

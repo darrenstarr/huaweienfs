@@ -44,4 +44,10 @@ struct rpc_xprt_iter_ops {
 void rpc_xprt_switch_set_singular(struct rpc_xprt_switch *xps);
 void rpc_xprt_switch_set_roundrobin(struct rpc_xprt_switch *xps);
 
+/* Iterator helpers used by failover_path's reselect_xprt. Stubbed in
+ * tests/stubs/failover_path_stubs.c (failover_path tests never reach
+ * this code path). */
+struct rpc_xprt *xprt_iter_get_xprt(struct rpc_xprt_iter *xpi);
+struct rpc_xprt *xprt_iter_get_next(struct rpc_xprt_iter *xpi);
+
 #endif /* _LINUX_SUNRPC_XPRTMULTIPATH_H */

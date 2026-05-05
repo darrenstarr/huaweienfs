@@ -8,7 +8,19 @@
  * top-level Kbuild. Add #ifdef KERNEL_VERSION blocks here rather than
  * editing vendored sources line-by-line; that keeps `git diff` against
  * vendor/openeuler/ readable and makes future kernel rebases mechanical.
+ *
+ * BUILDING_ESUNRPC: set for compilation units of the forked esunrpc.ko
+ * (see docs/internals/15-esunrpc-fork.md). Those TUs MUST NOT see
+ * stock <linux/sunrpc/*.h> definitions transitively, because our
+ * forked <esunrpc/*.h> headers redefine the same struct types
+ * (intentionally — same names, separate namespaces). When set, this
+ * file is a no-op so esunrpc TUs stay isolated from stock sunrpc
+ * headers entirely.
  */
+#ifdef BUILDING_ESUNRPC
+/* esunrpc fork — keep stock sunrpc headers out of these TUs. */
+#else /* !BUILDING_ESUNRPC */
+
 #ifndef _ENFS_COMPAT_H_
 #define _ENFS_COMPAT_H_
 
@@ -176,3 +188,5 @@ static inline struct rpc_xprt *enfs_compat_xprt_iter_get_xprt(struct rpc_xprt_it
 #endif /* >= 6.8.0 */
 
 #endif /* _ENFS_COMPAT_H_ */
+
+#endif /* !BUILDING_ESUNRPC */

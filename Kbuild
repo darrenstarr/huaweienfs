@@ -176,3 +176,43 @@ fs/nfs/enfs/enfs-y := \
 	fs/nfs/enfs/exten_call.o \
 	fs/nfs/enfs/dns_process.o \
 	fs/nfs/enfs/enfs_lookup_cache.o
+
+# ---------------------------------------------------------------------
+# esunrpc.ko — forked client-side SunRPC (the road to debian).
+#
+# Coexists with stock sunrpc.ko (and with the legacy patched sunrpc.ko
+# from this same package): every exported symbol is renamed to
+# esunrpc_<original> so there is no symbol collision at modprobe time.
+# Includes also use <esunrpc/X.h> instead of <linux/sunrpc/X.h> so the
+# compilation units of this module don't pull in stock sunrpc headers
+# (which would re-introduce CRC dependencies on stock).
+#
+# This module is the foundation of the clean-stack roadmap (PRs 1-7,
+# see docs/internals/15-esunrpc-fork.md). PR 1 — this one — only
+# proves the module loads and exports its renamed symbols. No client
+# work yet; that's PR 2 onwards.
+#
+# Object list mirrors the file set in vendor/esunrpc/MANIFEST.
+# ---------------------------------------------------------------------
+obj-m += net/esunrpc/esunrpc.o
+net/esunrpc/esunrpc-y := \
+	net/esunrpc/clnt.o net/esunrpc/xprt.o net/esunrpc/socklib.o \
+	net/esunrpc/xprtsock.o net/esunrpc/sched.o \
+	net/esunrpc/auth.o net/esunrpc/auth_null.o net/esunrpc/auth_unix.o \
+	net/esunrpc/auth_tls.o \
+	net/esunrpc/addr.o net/esunrpc/rpcb_clnt.o \
+	net/esunrpc/timer.o net/esunrpc/xdr.o \
+	net/esunrpc/xprtmultipath.o \
+	net/esunrpc/rpc_pipe.o net/esunrpc/cache.o net/esunrpc/stats.o \
+	net/esunrpc/sysfs.o net/esunrpc/sysctl.o net/esunrpc/debugfs.o \
+	net/esunrpc/svcauth_unix.o net/esunrpc/backchannel_rqst.o \
+	net/esunrpc/esunrpc_server_stubs.o \
+	net/esunrpc/esunrpc_syms.o
+
+# Per-TU flags for esunrpc compilation units. BUILDING_ESUNRPC tells
+# compat/enfs_compat.h to be a no-op for these files, so the
+# force-included compat header doesn't drag in stock <linux/sunrpc/*.h>
+# definitions. Without this, our <esunrpc/X.h> headers would redefine
+# struct types (xdr_buf, xdr_netobj, ...) that stock headers also
+# define — same names, different namespaces by design.
+$(foreach o,$(net/esunrpc/esunrpc-y),$(eval CFLAGS_$(o:.o=.o) += -DBUILDING_ESUNRPC=1))

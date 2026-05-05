@@ -38,5 +38,14 @@ bash scripts/fetch-vendor-ubuntu.sh ubuntu-7.0
 9. [Compat shims](./09-compat-shims.md) — what
    `compat/enfs_compat.h` papers over and why.
 10. *(reserved — live remount, `/proc/enfs/`, DNS rebind worker)*
+11. *(reserved — real-world lab testing)*
+12. *(reserved — performance tuning)*
+13. *(reserved — RDMA and load-sharing analysis)*
+14. *(reserved — NFSv4.1 multipath integrity)*
+15. [The esunrpc fork — design, scope, first build](./15-esunrpc-fork.md) —
+    PR 1 of the multi-PR roadmap to retire the legacy patch-stock
+    approach in favour of a fully forked, additive `esunrpc.ko` that
+    coexists with stock sunrpc.
 
-Chapters 6 and 10 are placeholders for follow-up work.
+Chapters 6 and 10–14 are placeholders for follow-up work; 11–14
+ship in separate feature branches.

@@ -38,7 +38,7 @@
  * construct contexts independently of xprts.
  * ------------------------------------------------------------------ */
 
-#define STUB_RESERVE_CTX_MAX 64
+#define STUB_RESERVE_CTX_MAX 512
 
 struct stub_reserve_entry {
     struct rpc_xprt *xprt;
@@ -94,7 +94,7 @@ bool enfs_is_main_xprt(struct rpc_xprt *xprt)
  * Each xprt in tests has a controllable path_state. Stored in a
  * parallel table for the same reason as reserve-context. */
 
-#define STUB_PATH_STATE_MAX 64
+#define STUB_PATH_STATE_MAX 512
 
 struct stub_path_state_entry {
     struct rpc_xprt      *xprt;

@@ -901,19 +901,599 @@ static Suite *roundrobin_suite(void)
     tcase_add_test(tc_flip, is_singular_route_null_xps_returns_false);
     suite_add_tcase(s, tc_flip);
 
+    /* ============================================================ */
+    /* Stress: 8/16/32/64 xprts, full traversal, every result must  */
+    /* be in the list. Fed in via macros to keep the source dense.  */
+    /* ============================================================ */
+    extern Suite *roundrobin_stress_suite_install(Suite *s);
+    return roundrobin_stress_suite_install(s);
+}
+
+/* ================================================================ */
+/* Bulk parameterised tests appended to roundrobin_suite via the    */
+/* installer above. Each helper builds N healthy xprts then walks   */
+/* the full list, asserting that every position in the rotation is  */
+/* visited exactly once before any is repeated.                     */
+/* ================================================================ */
+
+static void rr_full_rotation_visits_each_once(unsigned int N)
+{
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt **xs = calloc(N, sizeof(*xs));
+    for (unsigned int i = 0; i < N; i++) {
+        xs[i] = make_xprt(0, /*main*/i == 0, PM_STATE_NORMAL);
+        xps_add(xps, xs[i]);
+    }
+
+    /* Walk N steps from cur=NULL; mark each xprt as we see it. */
+    bool *seen = calloc(N, sizeof(*seen));
+    struct rpc_xprt *cur = NULL;
+    for (unsigned int step = 0; step < N; step++) {
+        struct rpc_xprt *got =
+            enfs_lb_find_next_entry_roundrobin(xps, cur);
+        ck_assert_ptr_nonnull(got);
+        bool found = false;
+        for (unsigned int i = 0; i < N; i++) {
+            if (xs[i] == got) {
+                ck_assert_msg(!seen[i],
+                    "N=%u step=%u: xprt[%u] seen twice in one rotation",
+                    N, step, i);
+                seen[i] = true; found = true;
+                break;
+            }
+        }
+        ck_assert_msg(found,
+            "N=%u step=%u: returned xprt %p not in our list",
+            N, step, (void *)got);
+        cur = got;
+    }
+    /* All N must be seen. */
+    for (unsigned int i = 0; i < N; i++)
+        ck_assert_msg(seen[i],
+            "N=%u xprt[%u] never seen in one full rotation", N, i);
+    free(seen); free(xs);
+}
+
+#define ROTATION_TEST(N) \
+    START_TEST(rotation_visits_each_once_N_##N) { \
+        rr_full_rotation_visits_each_once(N); \
+    } END_TEST
+
+ROTATION_TEST(2)
+ROTATION_TEST(3)
+ROTATION_TEST(4)
+ROTATION_TEST(5)
+ROTATION_TEST(6)
+ROTATION_TEST(7)
+ROTATION_TEST(8)
+ROTATION_TEST(9)
+ROTATION_TEST(10)
+ROTATION_TEST(11)
+ROTATION_TEST(12)
+ROTATION_TEST(13)
+ROTATION_TEST(14)
+ROTATION_TEST(15)
+ROTATION_TEST(16)
+ROTATION_TEST(20)
+ROTATION_TEST(24)
+ROTATION_TEST(28)
+ROTATION_TEST(32)
+ROTATION_TEST(40)
+ROTATION_TEST(48)
+ROTATION_TEST(56)
+ROTATION_TEST(64)
+ROTATION_TEST(80)
+ROTATION_TEST(96)
+ROTATION_TEST(112)
+ROTATION_TEST(128)
+
+/* ================================================================ */
+/* Multi-rotation determinism: after K full rotations, each xprt    */
+/* sees exactly K picks. Tests cursor-wraparound consistency.       */
+/* ================================================================ */
+
+static void rr_K_rotations_equal_picks(unsigned int N, unsigned int K)
+{
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt **xs = calloc(N, sizeof(*xs));
+    for (unsigned int i = 0; i < N; i++) {
+        xs[i] = make_xprt(0, /*main*/i == 0, PM_STATE_NORMAL);
+        xps_add(xps, xs[i]);
+    }
+    unsigned int *picks = calloc(N, sizeof(*picks));
+    struct rpc_xprt *cur = NULL;
+    for (unsigned int step = 0; step < N * K; step++) {
+        struct rpc_xprt *got =
+            enfs_lb_find_next_entry_roundrobin(xps, cur);
+        ck_assert_ptr_nonnull(got);
+        for (unsigned int i = 0; i < N; i++)
+            if (xs[i] == got) { picks[i]++; break; }
+        cur = got;
+    }
+    for (unsigned int i = 0; i < N; i++)
+        ck_assert_msg(picks[i] == K,
+            "N=%u K=%u: xprt[%u] picked %u times (expected %u)",
+            N, K, i, picks[i], K);
+    free(picks); free(xs);
+}
+
+#define K_ROT_TEST(N, K) \
+    START_TEST(k_rotations_N_##N##_K_##K) { \
+        rr_K_rotations_equal_picks(N, K); \
+    } END_TEST
+
+K_ROT_TEST(2, 5)
+K_ROT_TEST(2, 100)
+K_ROT_TEST(4, 5)
+K_ROT_TEST(4, 100)
+K_ROT_TEST(8, 5)
+K_ROT_TEST(8, 100)
+K_ROT_TEST(8, 1000)
+K_ROT_TEST(16, 5)
+K_ROT_TEST(16, 100)
+K_ROT_TEST(16, 1000)
+K_ROT_TEST(32, 50)
+K_ROT_TEST(32, 500)
+K_ROT_TEST(64, 50)
+K_ROT_TEST(64, 500)
+
+/* ================================================================ */
+/* Failure-then-recovery: state machine moves through full sequence */
+/* INIT → NORMAL → FAULT → NORMAL → FAULT → INIT and we verify     */
+/* dispatch eligibility at each step.                              */
+/* ================================================================ */
+
+START_TEST(state_INIT_then_NORMAL_eligible)
+{
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *x = make_xprt(0, false, PM_STATE_INIT);
+    xps_add(xps, x);
+    /* INIT: ineligible */
+    ck_assert_ptr_null(enfs_lb_find_next_entry_roundrobin(xps, NULL));
+    /* Transition to NORMAL: eligible */
+    stub_set_path_state(x, PM_STATE_NORMAL);
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), x);
+}
+END_TEST
+
+START_TEST(state_NORMAL_then_FAULT_ineligible)
+{
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *x = make_xprt(0, false, PM_STATE_NORMAL);
+    xps_add(xps, x);
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), x);
+    stub_set_path_state(x, PM_STATE_FAULT);
+    ck_assert_ptr_null(enfs_lb_find_next_entry_roundrobin(xps, NULL));
+}
+END_TEST
+
+START_TEST(state_FAULT_then_NORMAL_eligible_again)
+{
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *x = make_xprt(0, false, PM_STATE_FAULT);
+    xps_add(xps, x);
+    ck_assert_ptr_null(enfs_lb_find_next_entry_roundrobin(xps, NULL));
+    stub_set_path_state(x, PM_STATE_NORMAL);
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), x);
+}
+END_TEST
+
+START_TEST(state_full_cycle_INIT_NORMAL_FAULT_NORMAL)
+{
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *x = make_xprt(0, false, PM_STATE_INIT);
+    xps_add(xps, x);
+    ck_assert_ptr_null(enfs_lb_find_next_entry_roundrobin(xps, NULL));
+    stub_set_path_state(x, PM_STATE_NORMAL);
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), x);
+    stub_set_path_state(x, PM_STATE_FAULT);
+    ck_assert_ptr_null(enfs_lb_find_next_entry_roundrobin(xps, NULL));
+    stub_set_path_state(x, PM_STATE_NORMAL);
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), x);
+}
+END_TEST
+
+/* ================================================================ */
+/* Boundary: kref ≤ 0 means inactive — separate code path from      */
+/* path_state check. Each xprt's kref defaults to 1 in make_xprt(); */
+/* manually drop to 0 and verify ineligibility.                     */
+/* ================================================================ */
+
+START_TEST(kref_zero_means_ineligible_at_position_0)
+{
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *dead = make_xprt(0, false, PM_STATE_NORMAL);
+    struct rpc_xprt *live = make_xprt(0, false, PM_STATE_NORMAL);
+    /* Force dead's kref to 0. Direct atomic_set since kref_init was 1. */
+    atomic_set(&dead->kref.refcount, 0);
+    xps_add(xps, dead);
+    xps_add(xps, live);
+    /* Skip dead, return live. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), live);
+}
+END_TEST
+
+START_TEST(kref_zero_means_ineligible_at_position_last)
+{
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *live = make_xprt(0, false, PM_STATE_NORMAL);
+    struct rpc_xprt *dead = make_xprt(0, false, PM_STATE_NORMAL);
+    atomic_set(&dead->kref.refcount, 0);
+    xps_add(xps, live);
+    xps_add(xps, dead);
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), live);
+    /* Cursor at live → wraps past dead → returns live. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, live), live);
+}
+END_TEST
+
+/* ============================================================ */
+/* Boundary tests: cursor at non-existent xprt (RCU-removed).   */
+/* ============================================================ */
+
+START_TEST(cur_pointer_not_in_list_returns_first_eligible)
+{
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *a = make_xprt(0, false, PM_STATE_NORMAL);
+    struct rpc_xprt *b = make_xprt(0, false, PM_STATE_NORMAL);
+    struct rpc_xprt *outsider = make_xprt(0, false, PM_STATE_NORMAL);
+    xps_add(xps, a); xps_add(xps, b);
+    /* outsider is NOT in the list — cursor pointing there shouldn't
+     * make us return NULL forever; we wrap to the first eligible. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, outsider), a);
+}
+END_TEST
+
+START_TEST(cur_NULL_with_main_returns_main_when_native_up)
+{
+    stub_native_link_io_status = 1;
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *m = make_xprt(0, true, PM_STATE_NORMAL);
+    struct rpc_xprt *n = make_xprt(0, false, PM_STATE_NORMAL);
+    xps_add(xps, m); xps_add(xps, n);
+    /* native up + main eligible: cursor=NULL returns the first xprt
+     * in iteration order (m). */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), m);
+}
+END_TEST
+
+START_TEST(cur_NULL_with_main_returns_non_main_when_native_down)
+{
+    stub_native_link_io_status = 0;
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *m = make_xprt(0, true, PM_STATE_NORMAL);
+    struct rpc_xprt *n = make_xprt(0, false, PM_STATE_NORMAL);
+    xps_add(xps, m); xps_add(xps, n);
+    /* native down: main is skipped, first eligible is n. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), n);
+}
+END_TEST
+
+/* ============================================================ */
+/* Single eligible amongst many dead xprts.                     */
+/* ============================================================ */
+
+#define ONE_LIVE_AT_POS(name, pos, total) \
+    START_TEST(name) { \
+        struct rpc_xprt_switch *xps = make_xps(); \
+        struct rpc_xprt *live = NULL; \
+        for (unsigned int i = 0; i < (total); i++) { \
+            struct rpc_xprt *x = make_xprt(0, false, \
+                (i == (pos)) ? PM_STATE_NORMAL : PM_STATE_FAULT); \
+            xps_add(xps, x); \
+            if (i == (pos)) live = x; \
+        } \
+        ck_assert_ptr_eq( \
+            enfs_lb_find_next_entry_roundrobin(xps, NULL), live); \
+        ck_assert_ptr_eq( \
+            enfs_lb_find_next_entry_roundrobin(xps, live), live); \
+    } END_TEST
+
+ONE_LIVE_AT_POS(one_live_at_0_of_8,  0, 8)
+ONE_LIVE_AT_POS(one_live_at_1_of_8,  1, 8)
+ONE_LIVE_AT_POS(one_live_at_2_of_8,  2, 8)
+ONE_LIVE_AT_POS(one_live_at_3_of_8,  3, 8)
+ONE_LIVE_AT_POS(one_live_at_4_of_8,  4, 8)
+ONE_LIVE_AT_POS(one_live_at_5_of_8,  5, 8)
+ONE_LIVE_AT_POS(one_live_at_6_of_8,  6, 8)
+ONE_LIVE_AT_POS(one_live_at_7_of_8,  7, 8)
+ONE_LIVE_AT_POS(one_live_at_0_of_16, 0, 16)
+ONE_LIVE_AT_POS(one_live_at_8_of_16, 8, 16)
+ONE_LIVE_AT_POS(one_live_at_15_of_16,15,16)
+ONE_LIVE_AT_POS(one_live_at_0_of_32, 0, 32)
+ONE_LIVE_AT_POS(one_live_at_16_of_32,16,32)
+ONE_LIVE_AT_POS(one_live_at_31_of_32,31,32)
+
+/* ============================================================ */
+/* Wrap-around correctness at high N.                           */
+/* ============================================================ */
+
+START_TEST(wraparound_at_N_64) {
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *xs[64];
+    for (int i = 0; i < 64; i++) {
+        xs[i] = make_xprt(0, /*main*/i == 0, PM_STATE_NORMAL);
+        xps_add(xps, xs[i]);
+    }
+    /* Walk one full rotation to land back at xs[0]. */
+    struct rpc_xprt *cur = NULL;
+    for (int i = 0; i < 64; i++)
+        cur = enfs_lb_find_next_entry_roundrobin(xps, cur);
+    /* Next call should wrap to xs[0]. */
+    ck_assert_ptr_eq(
+        enfs_lb_find_next_entry_roundrobin(xps, cur), xs[0]);
+}
+END_TEST
+
+START_TEST(wraparound_at_N_128) {
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *xs[128];
+    for (int i = 0; i < 128; i++) {
+        xs[i] = make_xprt(0, /*main*/i == 0, PM_STATE_NORMAL);
+        xps_add(xps, xs[i]);
+    }
+    struct rpc_xprt *cur = NULL;
+    for (int i = 0; i < 128; i++)
+        cur = enfs_lb_find_next_entry_roundrobin(xps, cur);
+    ck_assert_ptr_eq(
+        enfs_lb_find_next_entry_roundrobin(xps, cur), xs[0]);
+}
+END_TEST
+
+/* Per-N wraparound parametric — verify the full-rotation invariant
+ * holds for many N values, not just the 64/128 above. */
+#define WRAPAROUND_N(name, n) \
+    START_TEST(name) { \
+        const int N = (n); \
+        struct rpc_xprt_switch *xps = make_xps(); \
+        struct rpc_xprt **xs = calloc(N, sizeof(*xs)); \
+        for (int i = 0; i < N; i++) { \
+            xs[i] = make_xprt(0, i == 0, PM_STATE_NORMAL); \
+            xps_add(xps, xs[i]); \
+        } \
+        struct rpc_xprt *cur = NULL; \
+        for (int i = 0; i < N; i++) \
+            cur = enfs_lb_find_next_entry_roundrobin(xps, cur); \
+        ck_assert_ptr_eq( \
+            enfs_lb_find_next_entry_roundrobin(xps, cur), xs[0]); \
+        free(xs); \
+    } END_TEST
+
+WRAPAROUND_N(wrap_n_2,    2)
+WRAPAROUND_N(wrap_n_3,    3)
+WRAPAROUND_N(wrap_n_5,    5)
+WRAPAROUND_N(wrap_n_7,    7)
+WRAPAROUND_N(wrap_n_11,   11)
+WRAPAROUND_N(wrap_n_13,   13)
+WRAPAROUND_N(wrap_n_17,   17)
+WRAPAROUND_N(wrap_n_19,   19)
+WRAPAROUND_N(wrap_n_23,   23)
+WRAPAROUND_N(wrap_n_31,   31)
+WRAPAROUND_N(wrap_n_37,   37)
+WRAPAROUND_N(wrap_n_50,   50)
+WRAPAROUND_N(wrap_n_75,   75)
+WRAPAROUND_N(wrap_n_99,   99)
+WRAPAROUND_N(wrap_n_100,  100)
+WRAPAROUND_N(wrap_n_127,  127)
+WRAPAROUND_N(wrap_n_200,  200)
+WRAPAROUND_N(wrap_n_250,  250)
+
+/* Multi-rotation: walk K full rotations, verify position after K*N
+ * calls equals position after 0 calls (modulo wrap). */
+#define MULTI_ROTATION(name, n, k) \
+    START_TEST(name) { \
+        const int N = (n); \
+        const int K = (k); \
+        struct rpc_xprt_switch *xps = make_xps(); \
+        struct rpc_xprt **xs = calloc(N, sizeof(*xs)); \
+        for (int i = 0; i < N; i++) { \
+            xs[i] = make_xprt(0, i == 0, PM_STATE_NORMAL); \
+            xps_add(xps, xs[i]); \
+        } \
+        struct rpc_xprt *cur = NULL; \
+        for (int i = 0; i < K * N; i++) \
+            cur = enfs_lb_find_next_entry_roundrobin(xps, cur); \
+        /* After K*N calls, cur is the last xprt of the K'th rotation, \
+         * so the next call wraps to xs[0]. */ \
+        ck_assert_ptr_eq( \
+            enfs_lb_find_next_entry_roundrobin(xps, cur), xs[0]); \
+        free(xs); \
+    } END_TEST
+
+MULTI_ROTATION(multi_rot_8_5,    8,   5)
+MULTI_ROTATION(multi_rot_8_10,   8,  10)
+MULTI_ROTATION(multi_rot_8_50,   8,  50)
+MULTI_ROTATION(multi_rot_16_5,  16,   5)
+MULTI_ROTATION(multi_rot_16_10, 16,  10)
+MULTI_ROTATION(multi_rot_16_25, 16,  25)
+MULTI_ROTATION(multi_rot_32_5,  32,   5)
+MULTI_ROTATION(multi_rot_32_10, 32,  10)
+MULTI_ROTATION(multi_rot_64_5,  64,   5)
+MULTI_ROTATION(multi_rot_128_3,128,   3)
+
+/* ============================================================ */
+/* Mid-walk state mutation.                                      */
+/* ============================================================ */
+
+START_TEST(mid_walk_kill_next_xprt_skips_it) {
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *a = make_xprt(0, false, PM_STATE_NORMAL);
+    struct rpc_xprt *b = make_xprt(0, false, PM_STATE_NORMAL);
+    struct rpc_xprt *c = make_xprt(0, false, PM_STATE_NORMAL);
+    xps_add(xps, a); xps_add(xps, b); xps_add(xps, c);
+    /* From a, next is b. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, a), b);
+    /* Kill b. From a, next eligible is c. */
+    stub_set_path_state(b, PM_STATE_FAULT);
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, a), c);
+}
+END_TEST
+
+START_TEST(mid_walk_resurrect_dead_xprt_includes_it) {
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *a = make_xprt(0, false, PM_STATE_NORMAL);
+    struct rpc_xprt *b = make_xprt(0, false, PM_STATE_FAULT);
+    struct rpc_xprt *c = make_xprt(0, false, PM_STATE_NORMAL);
+    xps_add(xps, a); xps_add(xps, b); xps_add(xps, c);
+    /* From a, next eligible is c (b dead). */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, a), c);
+    /* Resurrect b. From a, next is now b. */
+    stub_set_path_state(b, PM_STATE_NORMAL);
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, a), b);
+}
+END_TEST
+
+/* ================================================================ */
+/* The stress installer simply registers everything with the suite. */
+/* ================================================================ */
+
+Suite *roundrobin_stress_suite_install(Suite *s)
+{
+    /* Single-rotation visit-each-once at every N value. */
+    TCase *tc_rot = tcase_create("rotation_visits_each_once");
+    tcase_add_checked_fixture(tc_rot, setup, teardown);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_2);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_3);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_4);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_5);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_6);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_7);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_8);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_9);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_10);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_11);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_12);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_13);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_14);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_15);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_16);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_20);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_24);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_28);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_32);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_40);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_48);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_56);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_64);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_80);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_96);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_112);
+    tcase_add_test(tc_rot, rotation_visits_each_once_N_128);
+    suite_add_tcase(s, tc_rot);
+
+    /* Multi-rotation determinism. */
+    TCase *tc_kr = tcase_create("k_rotations");
+    tcase_add_checked_fixture(tc_kr, setup, teardown);
+    tcase_add_test(tc_kr, k_rotations_N_2_K_5);
+    tcase_add_test(tc_kr, k_rotations_N_2_K_100);
+    tcase_add_test(tc_kr, k_rotations_N_4_K_5);
+    tcase_add_test(tc_kr, k_rotations_N_4_K_100);
+    tcase_add_test(tc_kr, k_rotations_N_8_K_5);
+    tcase_add_test(tc_kr, k_rotations_N_8_K_100);
+    tcase_add_test(tc_kr, k_rotations_N_8_K_1000);
+    tcase_add_test(tc_kr, k_rotations_N_16_K_5);
+    tcase_add_test(tc_kr, k_rotations_N_16_K_100);
+    tcase_add_test(tc_kr, k_rotations_N_16_K_1000);
+    tcase_add_test(tc_kr, k_rotations_N_32_K_50);
+    tcase_add_test(tc_kr, k_rotations_N_32_K_500);
+    tcase_add_test(tc_kr, k_rotations_N_64_K_50);
+    tcase_add_test(tc_kr, k_rotations_N_64_K_500);
+    suite_add_tcase(s, tc_kr);
+
+    /* State-machine cycles. */
+    TCase *tc_sm = tcase_create("state_transitions");
+    tcase_add_checked_fixture(tc_sm, setup, teardown);
+    tcase_add_test(tc_sm, state_INIT_then_NORMAL_eligible);
+    tcase_add_test(tc_sm, state_NORMAL_then_FAULT_ineligible);
+    tcase_add_test(tc_sm, state_FAULT_then_NORMAL_eligible_again);
+    tcase_add_test(tc_sm, state_full_cycle_INIT_NORMAL_FAULT_NORMAL);
+    suite_add_tcase(s, tc_sm);
+
+    /* kref invariants. */
+    TCase *tc_kref = tcase_create("kref_eligibility");
+    tcase_add_checked_fixture(tc_kref, setup, teardown);
+    tcase_add_test(tc_kref, kref_zero_means_ineligible_at_position_0);
+    tcase_add_test(tc_kref, kref_zero_means_ineligible_at_position_last);
+    suite_add_tcase(s, tc_kref);
+
+    /* Cursor edge cases. */
+    TCase *tc_ced = tcase_create("cursor_edges");
+    tcase_add_checked_fixture(tc_ced, setup, teardown);
+    tcase_add_test(tc_ced, cur_pointer_not_in_list_returns_first_eligible);
+    tcase_add_test(tc_ced, cur_NULL_with_main_returns_main_when_native_up);
+    tcase_add_test(tc_ced, cur_NULL_with_main_returns_non_main_when_native_down);
+    suite_add_tcase(s, tc_ced);
+
+    /* One-survivor at every position. */
+    TCase *tc_solo = tcase_create("one_live_at_position");
+    tcase_add_checked_fixture(tc_solo, setup, teardown);
+    tcase_add_test(tc_solo, one_live_at_0_of_8);
+    tcase_add_test(tc_solo, one_live_at_1_of_8);
+    tcase_add_test(tc_solo, one_live_at_2_of_8);
+    tcase_add_test(tc_solo, one_live_at_3_of_8);
+    tcase_add_test(tc_solo, one_live_at_4_of_8);
+    tcase_add_test(tc_solo, one_live_at_5_of_8);
+    tcase_add_test(tc_solo, one_live_at_6_of_8);
+    tcase_add_test(tc_solo, one_live_at_7_of_8);
+    tcase_add_test(tc_solo, one_live_at_0_of_16);
+    tcase_add_test(tc_solo, one_live_at_8_of_16);
+    tcase_add_test(tc_solo, one_live_at_15_of_16);
+    tcase_add_test(tc_solo, one_live_at_0_of_32);
+    tcase_add_test(tc_solo, one_live_at_16_of_32);
+    tcase_add_test(tc_solo, one_live_at_31_of_32);
+    suite_add_tcase(s, tc_solo);
+
+    /* Wraparound + mid-walk mutation. */
+    TCase *tc_mut = tcase_create("dynamic_state");
+    tcase_add_checked_fixture(tc_mut, setup, teardown);
+    tcase_add_test(tc_mut, wraparound_at_N_64);
+    tcase_add_test(tc_mut, wraparound_at_N_128);
+    tcase_add_test(tc_mut, mid_walk_kill_next_xprt_skips_it);
+    tcase_add_test(tc_mut, mid_walk_resurrect_dead_xprt_includes_it);
+    suite_add_tcase(s, tc_mut);
+
+    /* Per-N wraparound parametric. */
+    TCase *tc_wn = tcase_create("wraparound_per_N");
+    tcase_add_checked_fixture(tc_wn, setup, teardown);
+    tcase_add_test(tc_wn, wrap_n_2);
+    tcase_add_test(tc_wn, wrap_n_3);
+    tcase_add_test(tc_wn, wrap_n_5);
+    tcase_add_test(tc_wn, wrap_n_7);
+    tcase_add_test(tc_wn, wrap_n_11);
+    tcase_add_test(tc_wn, wrap_n_13);
+    tcase_add_test(tc_wn, wrap_n_17);
+    tcase_add_test(tc_wn, wrap_n_19);
+    tcase_add_test(tc_wn, wrap_n_23);
+    tcase_add_test(tc_wn, wrap_n_31);
+    tcase_add_test(tc_wn, wrap_n_37);
+    tcase_add_test(tc_wn, wrap_n_50);
+    tcase_add_test(tc_wn, wrap_n_75);
+    tcase_add_test(tc_wn, wrap_n_99);
+    tcase_add_test(tc_wn, wrap_n_100);
+    tcase_add_test(tc_wn, wrap_n_127);
+    tcase_add_test(tc_wn, wrap_n_200);
+    tcase_add_test(tc_wn, wrap_n_250);
+    suite_add_tcase(s, tc_wn);
+
+    /* Multi-rotation tests. */
+    TCase *tc_mr = tcase_create("multi_rotation");
+    tcase_add_checked_fixture(tc_mr, setup, teardown);
+    tcase_add_test(tc_mr, multi_rot_8_5);
+    tcase_add_test(tc_mr, multi_rot_8_10);
+    tcase_add_test(tc_mr, multi_rot_8_50);
+    tcase_add_test(tc_mr, multi_rot_16_5);
+    tcase_add_test(tc_mr, multi_rot_16_10);
+    tcase_add_test(tc_mr, multi_rot_16_25);
+    tcase_add_test(tc_mr, multi_rot_32_5);
+    tcase_add_test(tc_mr, multi_rot_32_10);
+    tcase_add_test(tc_mr, multi_rot_64_5);
+    tcase_add_test(tc_mr, multi_rot_128_3);
+    suite_add_tcase(s, tc_mr);
+
     return s;
 }
 
-int main(void)
-{
-    Suite   *s  = roundrobin_suite();
-    SRunner *sr = srunner_create(s);
-
-    /* CK_VERBOSE prints per-test outcome. CI parses the trailing
-     * pass/fail count from stdout. */
-    srunner_run_all(sr, CK_VERBOSE);
-
-    int failed = srunner_ntests_failed(sr);
-    srunner_free(sr);
-    return failed == 0 ? 0 : 1;
-}
+/* Common runner: set CK_XML_LOG_FILE in the environment for JUnit XML;
+ * see tests/unit/check_runner.h. */
+#define CHECK_RUNNER_SUITE  roundrobin_suite
+#include "check_runner.h"
