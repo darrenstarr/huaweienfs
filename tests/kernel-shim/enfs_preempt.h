@@ -82,6 +82,10 @@ struct rpc_task;
 struct enfs_xprt_context {
     atomic_long_t queuelen;
     bool          main;
+    atomic_t      path_state;     /* used by pm_state.c */
+    struct sockaddr_storage srcaddr; /* used by pm_state.c diagnostics */
+    int           protocol;       /* IPPROTO_TCP/UDP — diagnostics only */
+    void         *stats;          /* opaque iostats pointer */
     /* Tests don't currently inspect any other field. Extend if
      * needed. */
 };

@@ -93,7 +93,8 @@ LDLIBS := $(CHECK_LIBS) -lpthread
 # and defining ENFS_SRC_<name> and STUBS_<name>.
 # ---------------------------------------------------------------------
 
-TESTS := test_enfs_roundrobin test_enfs_multipath_parse test_loadbalance_simulator
+TESTS := test_enfs_roundrobin test_enfs_multipath_parse test_loadbalance_simulator \
+         test_pm_state
 
 ENFS_SRC_test_enfs_roundrobin := $(ENFS_SRC_ROOT)/enfs_roundrobin.c
 STUBS_test_enfs_roundrobin    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_deps_stubs.c
@@ -105,6 +106,14 @@ STUBS_test_enfs_roundrobin    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_d
 # test_enfs_roundrobin.c don't cover.
 ENFS_SRC_test_loadbalance_simulator := $(ENFS_SRC_ROOT)/enfs_roundrobin.c
 STUBS_test_loadbalance_simulator    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_deps_stubs.c
+
+# pm_state: state machine governing per-path eligibility. Pure logic,
+# small file (~216 LOC), perfect target for thorough coverage of every
+# state transition + error branch.
+ENFS_SRC_test_pm_state := $(ENFS_SRC_ROOT)/pm_state.c
+# Use a pm_state-specific stub set: the standard enfs_deps_stubs.c
+# defines pm_get_path_state which would collide with the SUT.
+STUBS_test_pm_state    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/pm_state_stubs.c
 
 # Address-list parser. Covers BOTH IPv4 (the production target for
 # customer storage) and IPv6 (the project lab fabric). Uses libc-
