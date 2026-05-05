@@ -28,13 +28,15 @@ jobs:
             headers: "linux-headers-generic"
             linux_source: "linux-source-6.8.0"
             apt_source_fallback: ""  # not used when binary present
-          # HWE 6.14: NO binary linux-source-6.14.0 published. Use apt
-          # source on the linux-hwe-6.14 source package as the fallback.
-          - target: ubuntu-6.14
-            kver-prefix: "6.14.0"
-            headers: "linux-headers-6.14.0-37-generic"
-            linux_source: "linux-source-6.14.0"
-            apt_source_fallback: "linux-hwe-6.14"
+          # HWE 6.14 — TEMPORARILY DISABLED while the esunrpc + test
+          # work is in flight. Re-add once that work is integrated.
+          # See https://github.com/darrenstarr/huaweienfs/issues/38
+          # for the tracking issue.
+          # - target: ubuntu-6.14
+          #   kver-prefix: "6.14.0"
+          #   headers: "linux-headers-6.14.0-37-generic"
+          #   linux_source: "linux-source-6.14.0"
+          #   apt_source_fallback: "linux-hwe-6.14"
     steps:
       - uses: actions/checkout@v6
 
@@ -169,15 +171,15 @@ jobs:
           done
 
   # aarch64 native build on GitHub-hosted Ampere Altra runners
-  # (ubuntu-24.04-arm). Same install + make flow as the amd64 jobs;
-  # finishes in ~2 min instead of the 20-50 min the previous
-  # QEMU+binfmt container needed.
+  # (ubuntu-24.04-arm).
   #
-  # This proves the source compiles natively for arm64. On-target
-  # *load* testing under a real running arm64 kernel is separate
-  # (the runner is a sandboxed VM that doesn't let us modprobe
-  # foreign-built modules); we run that on enfs-dev-24-arm64.
+  # TEMPORARILY DISABLED while the esunrpc + test work is in flight.
+  # The job stays in the file so re-enabling is a one-line change to
+  # `if:`; do not delete the body. Re-enable when the new test
+  # infrastructure has been validated on amd64. Tracked at
+  # https://github.com/darrenstarr/huaweienfs/issues/38.
   build-arm64-native:
+    if: false
     name: build (${{ matrix.target }} arm64)
     runs-on: ubuntu-24.04-arm
     strategy:
