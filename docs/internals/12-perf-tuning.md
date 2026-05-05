@@ -408,7 +408,40 @@ for revisit if/when the workload profile changes. The change is
 ~50 LOC and well-localised in `enfs_roundrobin.c` + the iter struct
 in `xprtmultipath.h`.
 
-### 12.5.2 Other deferred structural ideas
+### 12.5.2 Tier 4 — ideas considered and ruled out
+
+These came up in the pre-experiment analysis and were explicitly
+deprioritised. Capturing them here so the reader knows we considered
+them and why.
+
+- **"Batch RPC scheduling" at the client.** Originally dismissed as
+  redundant with `tcp_slot_table_entries`. With the DPC-on-TCP
+  datapoint (see §12.2.3) this needs a finer split:
+  - *Syscall-level batching* (one task issuing many RPCs through
+    `iodepth>1` / libaio / io_uring): yes, the slot table covers
+    this, and Tier 1.1 confirmed it's already adequate for the
+    `psync,direct=1` workloads tested here.
+  - *RPC-level pipelining within one xprt* (many in-flight RPCs
+    per task, async dispatch): NOT covered by the slot table, and
+    it's the actual lever DPC uses. Reclassified as the headline
+    future-work item — see §12.5.3 / [#32](https://github.com/darrenstarr/huaweienfs/issues/32).
+- **Hierarchical locking for client enumerations.** The per-mount
+  `rpc_xprt_switch` walks are short and rare on the dispatch path
+  (one short list iteration per dispatch); making them lock-free
+  or per-CPU is over-engineering for a structure that's not on the
+  hot path. Ruled out.
+- **Asynchronous transport initialization.** Improves mount-time
+  latency (parallel `connect()` to all 16 xprts at mount), not
+  steady-state I/O — and steady-state is what this chapter measures.
+  Could be a future quality-of-life improvement; not a perf lever.
+  Ruled out for this analysis.
+- **Adaptive ping interval** (1 s for fresh / unstable xprts, 30 s
+  for stable). Real but tiny CPU savings (16 NULL-RPCs per 30 s vs
+  per 10 s). Faster failure detection is a separate goal that
+  belongs in the path-manager work, not in perf tuning. Ruled out
+  for this analysis.
+
+### 12.5.3 Other deferred structural ideas
 
 - **Pipelined RPC dispatch (RPC pipelining within one xprt):** would
   remove the synchronous-1-RPC-in-flight-per-task ceiling in §12.2.3
