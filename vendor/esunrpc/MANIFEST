@@ -1,0 +1,50 @@
+# Files copied from the upstream kernel source tree, by category.
+# The fork process (scripts/fork-sunrpc.sh) extracts these, applies
+# the rename rules, and lands the result under net/esunrpc/ +
+# include/esunrpc/.
+#
+# Trim rationale (what was deliberately NOT copied) is in
+# docs/internals/15-esunrpc-fork.md §15.3.
+
+# Client-side .c files
+net/sunrpc/clnt.c
+net/sunrpc/xprt.c
+net/sunrpc/xprtsock.c
+net/sunrpc/xprtmultipath.c
+net/sunrpc/sched.c
+net/sunrpc/xdr.c
+net/sunrpc/auth.c
+net/sunrpc/auth_unix.c
+net/sunrpc/auth_null.c
+net/sunrpc/addr.c
+net/sunrpc/rpcb_clnt.c
+net/sunrpc/timer.c
+net/sunrpc/socklib.c
+
+# Module init (renamed to esunrpc_syms.c by the fork process)
+net/sunrpc/sunrpc_syms.c
+
+# Internal headers
+net/sunrpc/socklib.h
+net/sunrpc/sunrpc.h
+net/sunrpc/netns.h
+net/sunrpc/fail.h
+
+# Public client headers (relocated from include/linux/sunrpc/ to
+# include/esunrpc/ by the fork process)
+include/linux/sunrpc/addr.h
+include/linux/sunrpc/auth.h
+include/linux/sunrpc/cache.h
+include/linux/sunrpc/clnt.h
+include/linux/sunrpc/debug.h
+include/linux/sunrpc/metrics.h
+include/linux/sunrpc/msg_prot.h
+include/linux/sunrpc/rpc_pipe_fs.h
+include/linux/sunrpc/sched.h
+include/linux/sunrpc/stats.h
+include/linux/sunrpc/timer.h
+include/linux/sunrpc/types.h
+include/linux/sunrpc/xdr.h
+include/linux/sunrpc/xprt.h
+include/linux/sunrpc/xprtmultipath.h
+include/linux/sunrpc/xprtsock.h

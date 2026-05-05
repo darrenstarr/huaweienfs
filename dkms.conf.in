@@ -4,15 +4,25 @@
 # (or by debian/rules at package-build time) using the version from
 # debian/changelog.
 #
-# This DKMS module produces SIX kernel objects that together replace
-# the host's in-tree NFS client stack:
+# This DKMS module produces SEVEN kernel objects:
+#
+# Legacy stack (replaces the host's in-tree NFS client modules — to be
+# retired once the clean stack reaches feature parity, see
+# docs/internals/15-esunrpc-fork.md §15.8 / PR 7):
 #
 #   net/sunrpc/sunrpc.ko    stock SunRPC + sunrpc_enfs_adapter.o
 #   fs/nfs_common/nfs_acl.ko  rebuilt against our patched sunrpc CRCs
 #   fs/lockd/lockd.ko       rebuilt against our patched sunrpc CRCs
 #   fs/nfs/nfs.ko           stock NFS client + enfs_adapter.o
 #   fs/nfs/nfsv3.ko         NFSv3 procedure table + enfs EXTEND op
-#   fs/nfs/enfs/enfs.ko     the new multipath module
+#   fs/nfs/enfs/enfs.ko     the multipath module
+#
+# Clean stack (additive, coexists with stock kernel modules):
+#
+#   net/esunrpc/esunrpc.ko  forked client-side SunRPC; every exported
+#                           symbol renamed to esunrpc_* so it does not
+#                           collide with stock sunrpc.ko. PR 1 of the
+#                           clean-stack roadmap; see chapter 15.
 #
 # DKMS installs them under /lib/modules/$kernelver/updates/, which
 # `depmod` ranks higher than kernel/, so subsequent modprobe always
@@ -62,6 +72,10 @@ DEST_MODULE_LOCATION[4]="/updates"
 BUILT_MODULE_NAME[5]="enfs"
 BUILT_MODULE_LOCATION[5]="src/fs/nfs/enfs"
 DEST_MODULE_LOCATION[5]="/updates"
+
+BUILT_MODULE_NAME[6]="esunrpc"
+BUILT_MODULE_LOCATION[6]="src/net/esunrpc"
+DEST_MODULE_LOCATION[6]="/updates"
 
 # Rebuild on every kernel update.
 AUTOINSTALL="yes"

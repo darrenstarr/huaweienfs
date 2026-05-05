@@ -29,10 +29,11 @@ TARGET := ubuntu-7.0
 endif
 endif
 
-UBUNTU_VENDOR_DIR := $(CURDIR)/vendor/$(TARGET)
-OE_VENDOR_DIR     := $(CURDIR)/vendor/openeuler
-PATCHES_DIR       := $(CURDIR)/patches/$(TARGET)
-COMPAT_DIR        := $(CURDIR)/compat
+UBUNTU_VENDOR_DIR  := $(CURDIR)/vendor/$(TARGET)
+OE_VENDOR_DIR      := $(CURDIR)/vendor/openeuler
+ESUNRPC_VENDOR_DIR := $(CURDIR)/vendor/esunrpc
+PATCHES_DIR        := $(CURDIR)/patches/$(TARGET)
+COMPAT_DIR         := $(CURDIR)/compat
 # VM_HOST and VM_PATH are intentionally unset by default — set them in
 # your shell, in secrets/local-env.sh (gitignored), or on the command
 # line, e.g.:
@@ -84,6 +85,7 @@ port: fetch-vendor
 	@scripts/build-src-tree.sh \
 	    "$(UBUNTU_VENDOR_DIR)" \
 	    "$(OE_VENDOR_DIR)" \
+	    "$(ESUNRPC_VENDOR_DIR)" \
 	    "$(PATCHES_DIR)" \
 	    "$(COMPAT_DIR)" \
 	    "$(SRC_DIR)"
