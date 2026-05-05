@@ -710,6 +710,170 @@ START_TEST(reserve_eightybyte_chunks) {
 } END_TEST
 
 /* ============================================================ */
+/* esunrpc_xdr_restrict_buflen — shrink the writable end of the */
+/* xdr_buf. Returns -1 if shrinking past current data, 0 if no  */
+/* change needed, 0 + adjusts xdr->end if shrinking within.     */
+/* ============================================================ */
+
+extern int esunrpc_xdr_restrict_buflen(struct xdr_stream *xdr, int newbuflen);
+
+START_TEST(restrict_buflen_negative_returns_minus_one) {
+    struct xdr_stream xdr;
+    struct xdr_buf *buf = fresh_xdr_buf(256);
+    esunrpc_xdr_init_encode(&xdr, buf, buf->head[0].iov_base, NULL);
+    ck_assert_int_eq(esunrpc_xdr_restrict_buflen(&xdr, -1), -1);
+} END_TEST
+
+START_TEST(restrict_buflen_below_used_returns_minus_one) {
+    struct xdr_stream xdr;
+    struct xdr_buf *buf = fresh_xdr_buf(256);
+    esunrpc_xdr_init_encode(&xdr, buf, buf->head[0].iov_base, NULL);
+    esunrpc_xdr_reserve_space(&xdr, 64);
+    /* buf->len now 64; restricting to 32 must error. */
+    ck_assert_int_eq(esunrpc_xdr_restrict_buflen(&xdr, 32), -1);
+} END_TEST
+
+START_TEST(restrict_buflen_above_capacity_no_op_returns_zero) {
+    struct xdr_stream xdr;
+    struct xdr_buf *buf = fresh_xdr_buf(256);
+    esunrpc_xdr_init_encode(&xdr, buf, buf->head[0].iov_base, NULL);
+    /* buflen=256, requesting 1024 → SUT returns 0 without changing. */
+    ck_assert_int_eq(esunrpc_xdr_restrict_buflen(&xdr, 1024), 0);
+    ck_assert_int_eq(buf->buflen, 256);  /* unchanged */
+} END_TEST
+
+START_TEST(restrict_buflen_within_data_succeeds) {
+    struct xdr_stream xdr;
+    struct xdr_buf *buf = fresh_xdr_buf(256);
+    esunrpc_xdr_init_encode(&xdr, buf, buf->head[0].iov_base, NULL);
+    /* Restrict to 128 — below current 256 capacity but above used (0). */
+    ck_assert_int_eq(esunrpc_xdr_restrict_buflen(&xdr, 128), 0);
+    ck_assert_int_eq(buf->buflen, 128);
+} END_TEST
+
+START_TEST(restrict_buflen_exact_match_no_op_zero) {
+    struct xdr_stream xdr;
+    struct xdr_buf *buf = fresh_xdr_buf(256);
+    esunrpc_xdr_init_encode(&xdr, buf, buf->head[0].iov_base, NULL);
+    ck_assert_int_eq(esunrpc_xdr_restrict_buflen(&xdr, 256), 0);
+    ck_assert_int_eq(buf->buflen, 256);
+} END_TEST
+
+#define RESTRICT_BUFLEN_PARAM(name, cap, used, request, expected_rc, expected_buflen) \
+    START_TEST(name) { \
+        struct xdr_stream xdr; \
+        struct xdr_buf *buf = fresh_xdr_buf(cap); \
+        esunrpc_xdr_init_encode(&xdr, buf, buf->head[0].iov_base, NULL); \
+        if ((used) > 0) esunrpc_xdr_reserve_space(&xdr, (used)); \
+        ck_assert_int_eq(esunrpc_xdr_restrict_buflen(&xdr, (request)), (expected_rc)); \
+        ck_assert_int_eq(buf->buflen, (expected_buflen)); \
+    } END_TEST
+
+RESTRICT_BUFLEN_PARAM(rb_p_a, 1024,    0, 512,   0,  512)
+RESTRICT_BUFLEN_PARAM(rb_p_b, 1024,    0,   1,   0,    1)
+RESTRICT_BUFLEN_PARAM(rb_p_c, 1024,    0,   0,   0,    0)
+RESTRICT_BUFLEN_PARAM(rb_p_d, 1024,   64, 100,   0,  100)
+RESTRICT_BUFLEN_PARAM(rb_p_e, 1024,   64,  64,   0,   64)
+RESTRICT_BUFLEN_PARAM(rb_p_f, 1024,   64,  63,  -1, 1024)
+RESTRICT_BUFLEN_PARAM(rb_p_g, 1024,   64,  -5,  -1, 1024)
+RESTRICT_BUFLEN_PARAM(rb_p_h, 1024,    0, 2048,  0, 1024)
+RESTRICT_BUFLEN_PARAM(rb_p_i, 1024, 1024, 1024,  0, 1024)
+RESTRICT_BUFLEN_PARAM(rb_p_j, 1024, 1024, 1023, -1, 1024)
+
+/* ============================================================ */
+/* esunrpc_xdr_page_pos — encoded position relative to xdr pages */
+/* (= stream_pos - head[0].iov_len). For tests with no pages,   */
+/* page_pos returns 0 if stream_pos == head[0].iov_len.         */
+/* ============================================================ */
+
+extern unsigned int esunrpc_xdr_page_pos(const struct xdr_stream *xdr);
+
+START_TEST(page_pos_decode_at_start_is_zero) {
+    struct xdr_stream xdr = {0};
+    struct xdr_buf *buf = fresh_xdr_buf(256);
+    buf->len = 64; buf->head[0].iov_len = 64;
+    esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL);
+    /* Before decoding anything, page_pos == stream_pos - head_len = 0 - 64
+     * which would underflow; but stream_pos at decode-start ==
+     * head_len, so page_pos == 0. */
+    /* The SUT WARN_ONs here; calling it just to make sure it doesn't
+     * crash — we don't assert the value. */
+    (void)esunrpc_xdr_page_pos(&xdr);
+} END_TEST
+
+/* ============================================================ */
+/* esunrpc_xdr_truncate_decode — clip the decode stream length. */
+/* ============================================================ */
+
+extern void esunrpc_xdr_truncate_decode(struct xdr_stream *xdr, size_t len);
+
+/* truncate_decode aligns the requested length UP to the nearest
+ * multiple of 4 (XDR word size) before subtracting it from buf->len.
+ * So a request to truncate by 1 actually shrinks by 4. The
+ * parametric tests below operate on 4-byte-aligned values. */
+START_TEST(truncate_decode_basic_clips_buf_len) {
+    struct xdr_stream xdr = {0};
+    struct xdr_buf *buf = fresh_xdr_buf(256);
+    buf->len = 128; buf->head[0].iov_len = 128;
+    esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL);
+    esunrpc_xdr_truncate_decode(&xdr, 16);
+    ck_assert_int_eq(buf->len, 128 - 16);
+} END_TEST
+
+START_TEST(truncate_decode_unaligned_rounds_up_to_word) {
+    struct xdr_stream xdr = {0};
+    struct xdr_buf *buf = fresh_xdr_buf(256);
+    buf->len = 128; buf->head[0].iov_len = 128;
+    esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL);
+    /* take=1 aligns up to 4 → buf->len becomes 124. */
+    esunrpc_xdr_truncate_decode(&xdr, 1);
+    ck_assert_int_eq(buf->len, 124);
+} END_TEST
+
+START_TEST(truncate_decode_three_aligns_to_four) {
+    struct xdr_stream xdr = {0};
+    struct xdr_buf *buf = fresh_xdr_buf(256);
+    buf->len = 128; buf->head[0].iov_len = 128;
+    esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL);
+    esunrpc_xdr_truncate_decode(&xdr, 3);
+    ck_assert_int_eq(buf->len, 124);
+} END_TEST
+
+START_TEST(truncate_decode_zero_is_no_op) {
+    struct xdr_stream xdr = {0};
+    struct xdr_buf *buf = fresh_xdr_buf(256);
+    buf->len = 128; buf->head[0].iov_len = 128;
+    esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL);
+    esunrpc_xdr_truncate_decode(&xdr, 0);
+    ck_assert_int_eq(buf->len, 128);
+} END_TEST
+
+#define TRUNCATE_DECODE_PARAM(name, init_len, take, expected_len) \
+    START_TEST(name) { \
+        struct xdr_stream xdr = {0}; \
+        struct xdr_buf *buf = fresh_xdr_buf(1024); \
+        buf->len = (init_len); buf->head[0].iov_len = (init_len); \
+        esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL); \
+        esunrpc_xdr_truncate_decode(&xdr, (take)); \
+        ck_assert_int_eq(buf->len, (expected_len)); \
+    } END_TEST
+
+/* All parameters use 4-byte-aligned `take` values to keep the
+ * relationship `expected_len = init_len - take` clean. */
+TRUNCATE_DECODE_PARAM(td_p_a, 256,    0, 256)
+TRUNCATE_DECODE_PARAM(td_p_b, 256,    4, 252)
+TRUNCATE_DECODE_PARAM(td_p_c, 256,    8, 248)
+TRUNCATE_DECODE_PARAM(td_p_d, 256,   16, 240)
+TRUNCATE_DECODE_PARAM(td_p_e, 256,   64, 192)
+TRUNCATE_DECODE_PARAM(td_p_f, 256,  128, 128)
+TRUNCATE_DECODE_PARAM(td_p_g, 256,  200,  56)
+TRUNCATE_DECODE_PARAM(td_p_h, 512,  256, 256)
+TRUNCATE_DECODE_PARAM(td_p_i, 512,  512,   0)
+TRUNCATE_DECODE_PARAM(td_p_j, 1024, 100, 924)
+TRUNCATE_DECODE_PARAM(td_p_k, 1024, 1020,  4)
+TRUNCATE_DECODE_PARAM(td_p_l, 1024, 1024,  0)
+
+/* ============================================================ */
 /* Suite plumbing                                               */
 /* ============================================================ */
 
@@ -971,6 +1135,47 @@ static Suite *esunrpc_xdr_suite(void)
     tcase_add_test(t15, reserve_many_4byte_chunks);
     tcase_add_test(t15, reserve_eightybyte_chunks);
     suite_add_tcase(s, t15);
+
+    TCase *t16 = tcase_create("restrict_buflen");
+    tcase_add_test(t16, restrict_buflen_negative_returns_minus_one);
+    tcase_add_test(t16, restrict_buflen_below_used_returns_minus_one);
+    tcase_add_test(t16, restrict_buflen_above_capacity_no_op_returns_zero);
+    tcase_add_test(t16, restrict_buflen_within_data_succeeds);
+    tcase_add_test(t16, restrict_buflen_exact_match_no_op_zero);
+    tcase_add_test(t16, rb_p_a);
+    tcase_add_test(t16, rb_p_b);
+    tcase_add_test(t16, rb_p_c);
+    tcase_add_test(t16, rb_p_d);
+    tcase_add_test(t16, rb_p_e);
+    tcase_add_test(t16, rb_p_f);
+    tcase_add_test(t16, rb_p_g);
+    tcase_add_test(t16, rb_p_h);
+    tcase_add_test(t16, rb_p_i);
+    tcase_add_test(t16, rb_p_j);
+    suite_add_tcase(s, t16);
+
+    TCase *t17 = tcase_create("page_pos");
+    tcase_add_test(t17, page_pos_decode_at_start_is_zero);
+    suite_add_tcase(s, t17);
+
+    TCase *t18 = tcase_create("truncate_decode");
+    tcase_add_test(t18, truncate_decode_basic_clips_buf_len);
+    tcase_add_test(t18, truncate_decode_unaligned_rounds_up_to_word);
+    tcase_add_test(t18, truncate_decode_three_aligns_to_four);
+    tcase_add_test(t18, truncate_decode_zero_is_no_op);
+    tcase_add_test(t18, td_p_a);
+    tcase_add_test(t18, td_p_b);
+    tcase_add_test(t18, td_p_c);
+    tcase_add_test(t18, td_p_d);
+    tcase_add_test(t18, td_p_e);
+    tcase_add_test(t18, td_p_f);
+    tcase_add_test(t18, td_p_g);
+    tcase_add_test(t18, td_p_h);
+    tcase_add_test(t18, td_p_i);
+    tcase_add_test(t18, td_p_j);
+    tcase_add_test(t18, td_p_k);
+    tcase_add_test(t18, td_p_l);
+    suite_add_tcase(s, t18);
 
     return s;
 }
