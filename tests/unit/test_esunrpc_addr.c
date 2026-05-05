@@ -381,6 +381,71 @@ UADDR_ROUNDTRIP_V6(uaddr_rt_v6_c, "::1",         8080)
 UADDR_ROUNDTRIP_V6(uaddr_rt_v6_d, "2620::1",     0)
 
 /* ============================================================ */
+/* Parameterised: many addresses × many ports for round-trip.    */
+/* ============================================================ */
+
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_p1,  "10.0.0.1",     1)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_p256,"10.0.0.1",     256)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_p1024,"10.0.0.1",   1024)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_p2049,"10.0.0.1",   2049)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_p4567,"10.0.0.1",   4567)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_p8888,"10.0.0.1",   8888)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_p32768,"10.0.0.1",  32768)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_p65534,"10.0.0.1",  65534)
+
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_addr_a, "1.2.3.4",       2049)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_addr_b, "8.8.8.8",       2049)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_addr_c, "10.255.255.254",2049)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_addr_d, "172.16.0.1",    2049)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_addr_e, "172.31.255.254",2049)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_addr_f, "203.0.113.99",  2049)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_addr_g, "198.51.100.5",  2049)
+
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_p1,    "2001:db8::1", 1)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_p256,  "2001:db8::1", 256)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_p2049, "2001:db8::1", 2049)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_p32768,"2001:db8::1", 32768)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_p65534,"2001:db8::1", 65534)
+
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_addr_a, "fc00::1",    2049)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_addr_b, "fc07:2::18", 2049)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_addr_c, "fd00:1::1",  2049)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_addr_d, "2620:0:1::1",2049)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_addr_e, "2400::abcd", 2049)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_addr_f, "2620::ffff", 2049)
+
+/* ============================================================ */
+/* Wide ntop battery — exhaustive class-shape coverage.          */
+/* ============================================================ */
+
+V4_NTOP_TEST(ntop_v4_a_class_low,    "1.0.0.1")
+V4_NTOP_TEST(ntop_v4_a_class_mid,    "100.50.25.12")
+V4_NTOP_TEST(ntop_v4_a_class_high,   "126.255.255.254")
+V4_NTOP_TEST(ntop_v4_b_class_low,    "128.0.0.1")
+V4_NTOP_TEST(ntop_v4_b_class_mid,    "172.16.5.5")
+V4_NTOP_TEST(ntop_v4_b_class_high,   "191.255.255.254")
+V4_NTOP_TEST(ntop_v4_c_class_low,    "192.0.0.1")
+V4_NTOP_TEST(ntop_v4_c_class_mid,    "200.100.50.25")
+V4_NTOP_TEST(ntop_v4_c_class_high,   "223.255.255.254")
+V4_NTOP_TEST(ntop_v4_test_net_a,     "192.0.2.1")
+V4_NTOP_TEST(ntop_v4_test_net_a2,    "192.0.2.99")
+V4_NTOP_TEST(ntop_v4_test_net_b,     "198.51.100.1")
+V4_NTOP_TEST(ntop_v4_test_net_c,     "203.0.113.1")
+
+V6_NTOP_TEST(ntop_v6_2001_db8_a,     "2001:db8::a")
+V6_NTOP_TEST(ntop_v6_2001_db8_b,     "2001:db8::b")
+V6_NTOP_TEST(ntop_v6_2001_db8_c,     "2001:db8::c")
+V6_NTOP_TEST(ntop_v6_fc00,           "fc00::1")
+V6_NTOP_TEST(ntop_v6_fc07_2,         "fc07:2::1")
+V6_NTOP_TEST(ntop_v6_fc07_2_4_2,     "fc07:2::4:2")
+V6_NTOP_TEST(ntop_v6_fd00,           "fd00::1")
+V6_NTOP_TEST(ntop_v6_fd99,           "fd99::beef")
+V6_NTOP_TEST(ntop_v6_2620_b,         "2620:0:2d0::1")
+V6_NTOP_TEST(ntop_v6_2620_c,         "2620:0:2d0::2")
+V6_NTOP_TEST(ntop_v6_2400,           "2400::1")
+V6_NTOP_TEST(ntop_v6_2607,           "2607::1")
+
+/* ============================================================ */
 /* Suite plumbing                                                */
 /* ============================================================ */
 
@@ -484,6 +549,65 @@ static Suite *esunrpc_addr_suite(void)
     tcase_add_test(t9, uaddr_rt_v6_c);
     tcase_add_test(t9, uaddr_rt_v6_d);
     suite_add_tcase(s, t9);
+
+    /* Wide round-trip parameterisation. */
+    TCase *t10 = tcase_create("uaddr_roundtrip_wide");
+    tcase_add_test(t10, uaddr_rt_v4_p1);
+    tcase_add_test(t10, uaddr_rt_v4_p256);
+    tcase_add_test(t10, uaddr_rt_v4_p1024);
+    tcase_add_test(t10, uaddr_rt_v4_p2049);
+    tcase_add_test(t10, uaddr_rt_v4_p4567);
+    tcase_add_test(t10, uaddr_rt_v4_p8888);
+    tcase_add_test(t10, uaddr_rt_v4_p32768);
+    tcase_add_test(t10, uaddr_rt_v4_p65534);
+    tcase_add_test(t10, uaddr_rt_v4_addr_a);
+    tcase_add_test(t10, uaddr_rt_v4_addr_b);
+    tcase_add_test(t10, uaddr_rt_v4_addr_c);
+    tcase_add_test(t10, uaddr_rt_v4_addr_d);
+    tcase_add_test(t10, uaddr_rt_v4_addr_e);
+    tcase_add_test(t10, uaddr_rt_v4_addr_f);
+    tcase_add_test(t10, uaddr_rt_v4_addr_g);
+    tcase_add_test(t10, uaddr_rt_v6_p1);
+    tcase_add_test(t10, uaddr_rt_v6_p256);
+    tcase_add_test(t10, uaddr_rt_v6_p2049);
+    tcase_add_test(t10, uaddr_rt_v6_p32768);
+    tcase_add_test(t10, uaddr_rt_v6_p65534);
+    tcase_add_test(t10, uaddr_rt_v6_addr_a);
+    tcase_add_test(t10, uaddr_rt_v6_addr_b);
+    tcase_add_test(t10, uaddr_rt_v6_addr_c);
+    tcase_add_test(t10, uaddr_rt_v6_addr_d);
+    tcase_add_test(t10, uaddr_rt_v6_addr_e);
+    tcase_add_test(t10, uaddr_rt_v6_addr_f);
+    suite_add_tcase(s, t10);
+
+    /* Exhaustive ntop battery. */
+    TCase *t11 = tcase_create("ntop_wide");
+    tcase_add_test(t11, ntop_v4_a_class_low);
+    tcase_add_test(t11, ntop_v4_a_class_mid);
+    tcase_add_test(t11, ntop_v4_a_class_high);
+    tcase_add_test(t11, ntop_v4_b_class_low);
+    tcase_add_test(t11, ntop_v4_b_class_mid);
+    tcase_add_test(t11, ntop_v4_b_class_high);
+    tcase_add_test(t11, ntop_v4_c_class_low);
+    tcase_add_test(t11, ntop_v4_c_class_mid);
+    tcase_add_test(t11, ntop_v4_c_class_high);
+    tcase_add_test(t11, ntop_v4_test_net_a);
+    tcase_add_test(t11, ntop_v4_test_net_a2);
+    tcase_add_test(t11, ntop_v4_test_net_b);
+    tcase_add_test(t11, ntop_v4_test_net_c);
+    tcase_add_test(t11, ntop_v6_2001_db8_a);
+    tcase_add_test(t11, ntop_v6_2001_db8_b);
+    tcase_add_test(t11, ntop_v6_2001_db8_c);
+    tcase_add_test(t11, ntop_v6_fc00);
+    tcase_add_test(t11, ntop_v6_fc07_2);
+    tcase_add_test(t11, ntop_v6_fc07_2_4_2);
+    tcase_add_test(t11, ntop_v6_fd00);
+    tcase_add_test(t11, ntop_v6_fd99);
+    tcase_add_test(t11, ntop_v6_2620_b);
+    tcase_add_test(t11, ntop_v6_2620_c);
+    tcase_add_test(t11, ntop_v6_2400);
+    tcase_add_test(t11, ntop_v6_2607);
+    suite_add_tcase(s, t11);
 
     return s;
 }
