@@ -609,6 +609,125 @@ START_TEST(cross_list_empty_remote_no_dup) {
     ck_assert_int_eq(nfs_multipath_parse_options_check_duplicate(o), 0);
 } END_TEST
 
+/* ================================================================ */
+/* Stress: many list-count + family permutations.                   */
+/* ================================================================ */
+
+#define V4_BIG_LIST_TEST(name, n) \
+    START_TEST(name) { \
+        struct multipath_mount_options *o = fresh_options(); \
+        char input[2048] = {0}; \
+        for (unsigned int i = 0; i < (n); i++) { \
+            char addr[32]; \
+            snprintf(addr, sizeof(addr), "10.%u.%u.%u%s", \
+                     ((i + 1) >> 16) & 0xff, ((i + 1) >> 8) & 0xff, \
+                     (i + 1) & 0xff, i + 1 < (n) ? "~" : ""); \
+            strlcat(input, addr, sizeof(input)); \
+        } \
+        ck_assert_int_eq(nfs_multipath_parse_ip_list( \
+            input, NULL, o, REMOTEADDR), 0); \
+        ck_assert_int_eq(o->remote_ip_list->count, (n)); \
+    } END_TEST
+
+V4_BIG_LIST_TEST(v4_list_count_3,   3)
+V4_BIG_LIST_TEST(v4_list_count_5,   5)
+V4_BIG_LIST_TEST(v4_list_count_6,   6)
+V4_BIG_LIST_TEST(v4_list_count_7,   7)
+V4_BIG_LIST_TEST(v4_list_count_9,   9)
+V4_BIG_LIST_TEST(v4_list_count_10,  10)
+V4_BIG_LIST_TEST(v4_list_count_12,  12)
+V4_BIG_LIST_TEST(v4_list_count_14,  14)
+V4_BIG_LIST_TEST(v4_list_count_20,  20)
+V4_BIG_LIST_TEST(v4_list_count_24,  24)
+V4_BIG_LIST_TEST(v4_list_count_28,  28)
+V4_BIG_LIST_TEST(v4_list_count_30,  30)
+
+/* Per-octet boundary acceptance for IPv4 parser. */
+#define V4_PARSE_OCTET_TEST(name, addr) \
+    START_TEST(name) { \
+        struct nfs_ip_list *l = fresh_list(); \
+        ck_assert_int_eq( \
+            enfs_parse_ip_single(l, NULL, addr, REMOTEADDR), 0); \
+        free(l); \
+    } END_TEST
+
+V4_PARSE_OCTET_TEST(v4_octet_0_0_0_1,     "0.0.0.1")
+V4_PARSE_OCTET_TEST(v4_octet_0_0_1_0,     "0.0.1.0")
+V4_PARSE_OCTET_TEST(v4_octet_0_1_0_0,     "0.1.0.0")
+V4_PARSE_OCTET_TEST(v4_octet_1_0_0_0,     "1.0.0.0")
+V4_PARSE_OCTET_TEST(v4_octet_192_0_2_0,   "192.0.2.0")
+V4_PARSE_OCTET_TEST(v4_octet_192_0_2_127, "192.0.2.127")
+V4_PARSE_OCTET_TEST(v4_octet_192_0_2_128, "192.0.2.128")
+V4_PARSE_OCTET_TEST(v4_octet_192_0_2_253, "192.0.2.253")
+V4_PARSE_OCTET_TEST(v4_octet_255_255_255_254, "255.255.255.254")
+V4_PARSE_OCTET_TEST(v4_octet_254_254_254_254, "254.254.254.254")
+V4_PARSE_OCTET_TEST(v4_octet_100_100_100_100, "100.100.100.100")
+V4_PARSE_OCTET_TEST(v4_octet_50_50_50_50,     "50.50.50.50")
+
+/* Sweep: every /16 we'd plausibly see in a customer config. */
+V4_PARSE_OCTET_TEST(v4_a_class_a,   "8.0.0.1")
+V4_PARSE_OCTET_TEST(v4_a_class_b,   "9.0.0.1")
+V4_PARSE_OCTET_TEST(v4_a_class_c,   "11.0.0.1")
+V4_PARSE_OCTET_TEST(v4_b_class_a,   "172.16.0.1")
+V4_PARSE_OCTET_TEST(v4_b_class_b,   "172.17.0.1")
+V4_PARSE_OCTET_TEST(v4_b_class_c,   "172.31.255.254")
+V4_PARSE_OCTET_TEST(v4_c_class_a,   "192.168.0.1")
+V4_PARSE_OCTET_TEST(v4_c_class_b,   "192.168.255.254")
+V4_PARSE_OCTET_TEST(v4_routable_a,  "203.0.113.1")
+V4_PARSE_OCTET_TEST(v4_routable_b,  "198.51.100.1")
+V4_PARSE_OCTET_TEST(v4_routable_c,  "8.8.4.4")
+V4_PARSE_OCTET_TEST(v4_routable_d,  "1.0.0.1")
+
+/* IPv6 round-trip parse + render (the parser keeps family info,
+ * which we already test elsewhere; here we add many addr literals
+ * to widen coverage of the parse function's IPv6 branch). */
+#define V6_PARSE_REP_TEST(name, addr) \
+    START_TEST(name) { \
+        struct nfs_ip_list *l = fresh_list(); \
+        ck_assert_int_eq( \
+            enfs_parse_ip_single(l, NULL, addr, REMOTEADDR), 0); \
+        ck_assert_int_eq(l->address[0].ss_family, AF_INET6); \
+        free(l); \
+    } END_TEST
+
+V6_PARSE_REP_TEST(v6_rep_2001_db8_a, "2001:db8::1")
+V6_PARSE_REP_TEST(v6_rep_2001_db8_b, "2001:db8:0:1::1")
+V6_PARSE_REP_TEST(v6_rep_2001_db8_c, "2001:db8:0:1::2")
+V6_PARSE_REP_TEST(v6_rep_2001_db8_d, "2001:db8::abcd")
+V6_PARSE_REP_TEST(v6_rep_fc07_2_4_3, "fc07:2::4:3")
+V6_PARSE_REP_TEST(v6_rep_fc07_2_4_4, "fc07:2::4:4")
+V6_PARSE_REP_TEST(v6_rep_fc07_2_4_5, "fc07:2::4:5")
+V6_PARSE_REP_TEST(v6_rep_fc07_2_4_6, "fc07:2::4:6")
+V6_PARSE_REP_TEST(v6_rep_fd00,       "fd00:1234::1")
+V6_PARSE_REP_TEST(v6_rep_fd01,       "fd01:5678::1")
+V6_PARSE_REP_TEST(v6_rep_fd02,       "fd02:9abc::1")
+V6_PARSE_REP_TEST(v6_rep_2620_a,     "2620:0:2d0:200::1")
+V6_PARSE_REP_TEST(v6_rep_2620_b,     "2620:0:2d0:200::2")
+V6_PARSE_REP_TEST(v6_rep_2620_c,     "2620:0:2d0:200::3")
+V6_PARSE_REP_TEST(v6_rep_huawei_lab, "fc07:2::4:1")
+V6_PARSE_REP_TEST(v6_rep_huawei_oc,  "fc07:2::18")
+
+/* Mixed-family lists must accept both. */
+START_TEST(mixed_family_list_v4_then_v6) {
+    struct nfs_ip_list *l = fresh_list();
+    ck_assert_int_eq(enfs_parse_ip_single(l, NULL, "192.0.2.10", REMOTEADDR), 0);
+    ck_assert_int_eq(enfs_parse_ip_single(l, NULL, "2001:db8::1", REMOTEADDR), 0);
+    ck_assert_int_eq(l->count, 2);
+    ck_assert_int_eq(l->address[0].ss_family, AF_INET);
+    ck_assert_int_eq(l->address[1].ss_family, AF_INET6);
+    free(l);
+} END_TEST
+
+START_TEST(mixed_family_list_v6_then_v4) {
+    struct nfs_ip_list *l = fresh_list();
+    ck_assert_int_eq(enfs_parse_ip_single(l, NULL, "2001:db8::1", REMOTEADDR), 0);
+    ck_assert_int_eq(enfs_parse_ip_single(l, NULL, "192.0.2.10", REMOTEADDR), 0);
+    ck_assert_int_eq(l->count, 2);
+    ck_assert_int_eq(l->address[0].ss_family, AF_INET6);
+    ck_assert_int_eq(l->address[1].ss_family, AF_INET);
+    free(l);
+} END_TEST
+
 /* ---------------------------------------------------------------- */
 /* Suite.                                                           */
 /* ---------------------------------------------------------------- */
@@ -740,6 +859,76 @@ static Suite *parse_suite(void)
     tcase_add_test(tcmix, cross_list_empty_local_no_dup);
     tcase_add_test(tcmix, cross_list_empty_remote_no_dup);
     suite_add_tcase(s, tcmix);
+
+    /* Big-list parameterised tests. */
+    TCase *tcbig = tcase_create("big_lists");
+    tcase_add_test(tcbig, v4_list_count_3);
+    tcase_add_test(tcbig, v4_list_count_5);
+    tcase_add_test(tcbig, v4_list_count_6);
+    tcase_add_test(tcbig, v4_list_count_7);
+    tcase_add_test(tcbig, v4_list_count_9);
+    tcase_add_test(tcbig, v4_list_count_10);
+    tcase_add_test(tcbig, v4_list_count_12);
+    tcase_add_test(tcbig, v4_list_count_14);
+    tcase_add_test(tcbig, v4_list_count_20);
+    tcase_add_test(tcbig, v4_list_count_24);
+    tcase_add_test(tcbig, v4_list_count_28);
+    tcase_add_test(tcbig, v4_list_count_30);
+    suite_add_tcase(s, tcbig);
+
+    /* IPv4 octet/range parse battery. */
+    TCase *tcoct = tcase_create("ipv4_octets");
+    tcase_add_test(tcoct, v4_octet_0_0_0_1);
+    tcase_add_test(tcoct, v4_octet_0_0_1_0);
+    tcase_add_test(tcoct, v4_octet_0_1_0_0);
+    tcase_add_test(tcoct, v4_octet_1_0_0_0);
+    tcase_add_test(tcoct, v4_octet_192_0_2_0);
+    tcase_add_test(tcoct, v4_octet_192_0_2_127);
+    tcase_add_test(tcoct, v4_octet_192_0_2_128);
+    tcase_add_test(tcoct, v4_octet_192_0_2_253);
+    tcase_add_test(tcoct, v4_octet_255_255_255_254);
+    tcase_add_test(tcoct, v4_octet_254_254_254_254);
+    tcase_add_test(tcoct, v4_octet_100_100_100_100);
+    tcase_add_test(tcoct, v4_octet_50_50_50_50);
+    tcase_add_test(tcoct, v4_a_class_a);
+    tcase_add_test(tcoct, v4_a_class_b);
+    tcase_add_test(tcoct, v4_a_class_c);
+    tcase_add_test(tcoct, v4_b_class_a);
+    tcase_add_test(tcoct, v4_b_class_b);
+    tcase_add_test(tcoct, v4_b_class_c);
+    tcase_add_test(tcoct, v4_c_class_a);
+    tcase_add_test(tcoct, v4_c_class_b);
+    tcase_add_test(tcoct, v4_routable_a);
+    tcase_add_test(tcoct, v4_routable_b);
+    tcase_add_test(tcoct, v4_routable_c);
+    tcase_add_test(tcoct, v4_routable_d);
+    suite_add_tcase(s, tcoct);
+
+    /* IPv6 widely-varied parse battery. */
+    TCase *tcv6r = tcase_create("ipv6_repertoire");
+    tcase_add_test(tcv6r, v6_rep_2001_db8_a);
+    tcase_add_test(tcv6r, v6_rep_2001_db8_b);
+    tcase_add_test(tcv6r, v6_rep_2001_db8_c);
+    tcase_add_test(tcv6r, v6_rep_2001_db8_d);
+    tcase_add_test(tcv6r, v6_rep_fc07_2_4_3);
+    tcase_add_test(tcv6r, v6_rep_fc07_2_4_4);
+    tcase_add_test(tcv6r, v6_rep_fc07_2_4_5);
+    tcase_add_test(tcv6r, v6_rep_fc07_2_4_6);
+    tcase_add_test(tcv6r, v6_rep_fd00);
+    tcase_add_test(tcv6r, v6_rep_fd01);
+    tcase_add_test(tcv6r, v6_rep_fd02);
+    tcase_add_test(tcv6r, v6_rep_2620_a);
+    tcase_add_test(tcv6r, v6_rep_2620_b);
+    tcase_add_test(tcv6r, v6_rep_2620_c);
+    tcase_add_test(tcv6r, v6_rep_huawei_lab);
+    tcase_add_test(tcv6r, v6_rep_huawei_oc);
+    suite_add_tcase(s, tcv6r);
+
+    /* Mixed-family lists. */
+    TCase *tcmf = tcase_create("mixed_families");
+    tcase_add_test(tcmf, mixed_family_list_v4_then_v6);
+    tcase_add_test(tcmf, mixed_family_list_v6_then_v4);
+    suite_add_tcase(s, tcmf);
 
     return s;
 }
