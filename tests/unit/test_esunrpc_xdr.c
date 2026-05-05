@@ -858,6 +858,122 @@ START_TEST(truncate_decode_zero_is_no_op) {
         ck_assert_int_eq(buf->len, (expected_len)); \
     } END_TEST
 
+/* ============================================================ */
+/* xdr_encode_hyper / xdr_decode_hyper — 64-bit big-endian round-trip. */
+/* ============================================================ */
+
+START_TEST(hyper_encode_zero) {
+    __be32 *p = fresh_buf();
+    __be32 *out = xdr_encode_hyper(p, 0);
+    ck_assert_ptr_eq(out, p + 2);
+    ck_assert_uint_eq(ntohl(p[0]), 0);
+    ck_assert_uint_eq(ntohl(p[1]), 0);
+    free(p);
+} END_TEST
+
+START_TEST(hyper_encode_low_bits_only) {
+    __be32 *p = fresh_buf();
+    xdr_encode_hyper(p, 0x12345678);
+    ck_assert_uint_eq(ntohl(p[0]), 0);
+    ck_assert_uint_eq(ntohl(p[1]), 0x12345678);
+    free(p);
+} END_TEST
+
+START_TEST(hyper_encode_high_bits_only) {
+    __be32 *p = fresh_buf();
+    xdr_encode_hyper(p, ((__u64)0x12345678) << 32);
+    ck_assert_uint_eq(ntohl(p[0]), 0x12345678);
+    ck_assert_uint_eq(ntohl(p[1]), 0);
+    free(p);
+} END_TEST
+
+START_TEST(hyper_encode_max_value) {
+    __be32 *p = fresh_buf();
+    xdr_encode_hyper(p, (__u64)-1);
+    ck_assert_uint_eq(ntohl(p[0]), 0xffffffff);
+    ck_assert_uint_eq(ntohl(p[1]), 0xffffffff);
+    free(p);
+} END_TEST
+
+START_TEST(hyper_decode_zero) {
+    __be32 *p = fresh_buf();
+    __u64 v;
+    p[0] = htonl(0); p[1] = htonl(0);
+    xdr_decode_hyper(p, &v);
+    ck_assert_uint_eq(v, 0);
+    free(p);
+} END_TEST
+
+START_TEST(hyper_decode_max) {
+    __be32 *p = fresh_buf();
+    __u64 v;
+    p[0] = htonl(0xffffffff); p[1] = htonl(0xffffffff);
+    xdr_decode_hyper(p, &v);
+    ck_assert_uint_eq(v, (__u64)-1);
+    free(p);
+} END_TEST
+
+START_TEST(hyper_decode_advances_pointer) {
+    __be32 *p = fresh_buf();
+    __u64 v;
+    __be32 *out = xdr_decode_hyper(p, &v);
+    ck_assert_ptr_eq(out, p + 2);
+    free(p);
+} END_TEST
+
+#define HYPER_RT_TEST(name, val) \
+    START_TEST(name) { \
+        __be32 *p = fresh_buf(); \
+        xdr_encode_hyper(p, (val)); \
+        __u64 v; \
+        xdr_decode_hyper(p, &v); \
+        ck_assert_uint_eq(v, (val)); \
+        free(p); \
+    } END_TEST
+
+HYPER_RT_TEST(hyper_rt_0,                    0ULL)
+HYPER_RT_TEST(hyper_rt_1,                    1ULL)
+HYPER_RT_TEST(hyper_rt_42,                   42ULL)
+HYPER_RT_TEST(hyper_rt_255,                  255ULL)
+HYPER_RT_TEST(hyper_rt_256,                  256ULL)
+HYPER_RT_TEST(hyper_rt_65535,                65535ULL)
+HYPER_RT_TEST(hyper_rt_65536,                65536ULL)
+HYPER_RT_TEST(hyper_rt_16M,                  0x1000000ULL)
+HYPER_RT_TEST(hyper_rt_4G_minus_1,           0xffffffffULL)
+HYPER_RT_TEST(hyper_rt_4G,                   0x100000000ULL)
+HYPER_RT_TEST(hyper_rt_4G_plus_1,            0x100000001ULL)
+HYPER_RT_TEST(hyper_rt_1TB,                  0x10000000000ULL)
+HYPER_RT_TEST(hyper_rt_1PB,                  0x4000000000000ULL)
+HYPER_RT_TEST(hyper_rt_max,                  0xffffffffffffffffULL)
+HYPER_RT_TEST(hyper_rt_max_minus_1,          0xfffffffffffffffeULL)
+HYPER_RT_TEST(hyper_rt_high_low_pattern,     0xdeadbeefcafebabeULL)
+HYPER_RT_TEST(hyper_rt_alternating,          0xa5a5a5a5a5a5a5a5ULL)
+HYPER_RT_TEST(hyper_rt_alternating_inv,      0x5a5a5a5a5a5a5a5aULL)
+HYPER_RT_TEST(hyper_rt_msb_only,             0x8000000000000000ULL)
+HYPER_RT_TEST(hyper_rt_lsb_only,             1ULL)
+HYPER_RT_TEST(hyper_rt_top_byte_only,        0xff00000000000000ULL)
+HYPER_RT_TEST(hyper_rt_bottom_byte_only,     0xffULL)
+
+/* Multi-hyper sequence. */
+START_TEST(hyper_rt_three_back_to_back) {
+    __be32 *p = fresh_buf();
+    __be32 *cur = p;
+    cur = xdr_encode_hyper(cur, 0x1111111111111111ULL);
+    cur = xdr_encode_hyper(cur, 0x2222222222222222ULL);
+    cur = xdr_encode_hyper(cur, 0x3333333333333333ULL);
+    ck_assert_ptr_eq(cur, p + 6);
+
+    __u64 a, b, c;
+    __be32 *r = p;
+    r = xdr_decode_hyper(r, &a);
+    r = xdr_decode_hyper(r, &b);
+    r = xdr_decode_hyper(r, &c);
+    ck_assert_uint_eq(a, 0x1111111111111111ULL);
+    ck_assert_uint_eq(b, 0x2222222222222222ULL);
+    ck_assert_uint_eq(c, 0x3333333333333333ULL);
+    free(p);
+} END_TEST
+
 /* All parameters use 4-byte-aligned `take` values to keep the
  * relationship `expected_len = init_len - take` clean. */
 TRUNCATE_DECODE_PARAM(td_p_a, 256,    0, 256)
@@ -1157,6 +1273,39 @@ static Suite *esunrpc_xdr_suite(void)
     TCase *t17 = tcase_create("page_pos");
     tcase_add_test(t17, page_pos_decode_at_start_is_zero);
     suite_add_tcase(s, t17);
+
+    TCase *t19 = tcase_create("hyper");
+    tcase_add_test(t19, hyper_encode_zero);
+    tcase_add_test(t19, hyper_encode_low_bits_only);
+    tcase_add_test(t19, hyper_encode_high_bits_only);
+    tcase_add_test(t19, hyper_encode_max_value);
+    tcase_add_test(t19, hyper_decode_zero);
+    tcase_add_test(t19, hyper_decode_max);
+    tcase_add_test(t19, hyper_decode_advances_pointer);
+    tcase_add_test(t19, hyper_rt_0);
+    tcase_add_test(t19, hyper_rt_1);
+    tcase_add_test(t19, hyper_rt_42);
+    tcase_add_test(t19, hyper_rt_255);
+    tcase_add_test(t19, hyper_rt_256);
+    tcase_add_test(t19, hyper_rt_65535);
+    tcase_add_test(t19, hyper_rt_65536);
+    tcase_add_test(t19, hyper_rt_16M);
+    tcase_add_test(t19, hyper_rt_4G_minus_1);
+    tcase_add_test(t19, hyper_rt_4G);
+    tcase_add_test(t19, hyper_rt_4G_plus_1);
+    tcase_add_test(t19, hyper_rt_1TB);
+    tcase_add_test(t19, hyper_rt_1PB);
+    tcase_add_test(t19, hyper_rt_max);
+    tcase_add_test(t19, hyper_rt_max_minus_1);
+    tcase_add_test(t19, hyper_rt_high_low_pattern);
+    tcase_add_test(t19, hyper_rt_alternating);
+    tcase_add_test(t19, hyper_rt_alternating_inv);
+    tcase_add_test(t19, hyper_rt_msb_only);
+    tcase_add_test(t19, hyper_rt_lsb_only);
+    tcase_add_test(t19, hyper_rt_top_byte_only);
+    tcase_add_test(t19, hyper_rt_bottom_byte_only);
+    tcase_add_test(t19, hyper_rt_three_back_to_back);
+    suite_add_tcase(s, t19);
 
     TCase *t18 = tcase_create("truncate_decode");
     tcase_add_test(t18, truncate_decode_basic_clips_buf_len);

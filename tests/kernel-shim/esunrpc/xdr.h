@@ -92,4 +92,28 @@ extern __be32 *esunrpc_xdr_encode_netobj(__be32 *p,
  * returned __be32 *). */
 extern __be32 *xdr_encode_array(__be32 *p, const void *src, unsigned int n);
 
+/* 64-bit hyper encode/decode. Real header has these as static
+ * inlines; mirror them so tests can call them directly. */
+static inline __be32 *xdr_encode_hyper(__be32 *p, __u64 val)
+{
+    /* Big-endian byte ordering; manual rather than put_unaligned_be64
+     * to avoid pulling in <asm/unaligned.h>. */
+    unsigned char *b = (unsigned char *)p;
+    b[0] = (val >> 56) & 0xff; b[1] = (val >> 48) & 0xff;
+    b[2] = (val >> 40) & 0xff; b[3] = (val >> 32) & 0xff;
+    b[4] = (val >> 24) & 0xff; b[5] = (val >> 16) & 0xff;
+    b[6] = (val >>  8) & 0xff; b[7] =  val        & 0xff;
+    return p + 2;
+}
+
+static inline __be32 *xdr_decode_hyper(__be32 *p, __u64 *valp)
+{
+    const unsigned char *b = (const unsigned char *)p;
+    *valp = ((__u64)b[0] << 56) | ((__u64)b[1] << 48)
+          | ((__u64)b[2] << 40) | ((__u64)b[3] << 32)
+          | ((__u64)b[4] << 24) | ((__u64)b[5] << 16)
+          | ((__u64)b[6] <<  8) | ((__u64)b[7]);
+    return p + 2;
+}
+
 #endif /* _ESUNRPC_XDR_H */
