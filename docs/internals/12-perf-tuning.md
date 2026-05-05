@@ -257,7 +257,7 @@ available against this server** — would need a server-side change.
 
 **Skipped.** The OceanStor exports here only speak NFSv3 + NFSv4.0;
 v4.1+ pNFS / sessions aren't on offer. Filed for visibility as
-[#28](https://github.com/darrenstarr/huaweienfs/issues/28).
+[#29](https://github.com/darrenstarr/huaweienfs/issues/29).
 
 ### 12.3.5 Tier 1 conclusion
 
@@ -275,10 +275,9 @@ path (Tier 2) or in the synchronous-RPC pipeline structure itself
 Single-stream reads at 1 MiB blocks **dropped** from 67 to 43 MB/s
 across Tier 1.2/1.3, which is a small absolute regression but
 reproducible. Filed as
-[#29](https://github.com/darrenstarr/huaweienfs/issues/29) for
-investigation — not a Tier 1 conclusion-blocker but worth chasing
-because the only thing that changed was buffer sizing and that
-shouldn't make reads slower.
+[#30](https://github.com/darrenstarr/huaweienfs/issues/30) for
+investigation — not a Tier 1 conclusion-blocker; most likely
+explanation is OceanStor read-cache cold after first remount.
 
 ## 12.4 Tier 2 — enfs algorithmic changes
 
@@ -317,9 +316,9 @@ no reboot). srcversion confirmed `7562B0DA9D7F14AC1875FB0` post-swap.
 
 | bs | streams | baseline | tier2 | delta |
 |---|---|---|---|---|
-| 1M | 1 | 67 | 43 | -36% (issue #29) |
-| 1M | 4 | 298 | 181 | -39% (issue #29) |
-| 1M | 16 | 1021 | 752 | -26% (issue #29) |
+| 1M | 1 | 67 | 43 | -36% (issue #30) |
+| 1M | 4 | 298 | 181 | -39% (issue #30) |
+| 1M | 16 | 1021 | 752 | -26% (issue #30) |
 | 1M | 64 | 3965 | n/a | hung (issue #27) |
 | 2M | 1 | 72 | 77 | +7% |
 | 2M | 4 | n/a | 308 | (baseline cache-contaminated) |
@@ -398,7 +397,7 @@ writes with `iodepth>1`, or NFS-over-RDMA where RPC RTT collapses
 to microseconds and dispatch overhead becomes the limit. Neither
 applies here.
 
-**Filed as [#30](https://github.com/darrenstarr/huaweienfs/issues/30)**
+**Filed as [#31](https://github.com/darrenstarr/huaweienfs/issues/31)**
 for revisit if/when the workload profile changes. The change is
 ~50 LOC and well-localised in `enfs_roundrobin.c` + the iter struct
 in `xprtmultipath.h`.
@@ -409,7 +408,7 @@ in `xprtmultipath.h`.
   remove the synchronous-1-RPC-in-flight-per-task ceiling in §12.2.3
   (330–400 IOPS regardless of block size). Largest single lever for
   single-stream throughput. Big change — touches sunrpc, not
-  enfs. Filed as [#31](https://github.com/darrenstarr/huaweienfs/issues/31).
+  enfs. Filed as [#32](https://github.com/darrenstarr/huaweienfs/issues/32).
 - **NFS-over-RDMA / RoCE transport:** would shrink RPC RTT from ~3
   ms to single-digit µs. The actual reason DPC achieves its
   numbers; not implementable inside enfs.ko. Out of scope for this
