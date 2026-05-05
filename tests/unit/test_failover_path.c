@@ -285,6 +285,90 @@ V3_FLAGS_DELAY_TEST(v3_top_remove_sent,   NFS3PROC_REMOVE,  true,  SUT_FAILOVER_
 V3_FLAGS_DELAY_TEST(v3_top_link_sent,     NFS3PROC_LINK,    true,  SUT_FAILOVER_RETRY_DELAY)
 V3_FLAGS_DELAY_TEST(v3_top_symlink_sent,  NFS3PROC_SYMLINK, true,  SUT_FAILOVER_RETRY_DELAY)
 
+/* Cross-product: every v3 idempotent op × {sent, not-sent} →
+ * always RETRY (sent doesn't promote idempotent ops to delay). */
+V3_FLAGS_DELAY_TEST(v3_top_read_sent,     NFS3PROC_READ,    true,  SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_read_unsent,   NFS3PROC_READ,    false, SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_getattr_sent,  NFS3PROC_GETATTR, true,  SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_getattr_unsent,NFS3PROC_GETATTR, false, SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_lookup_sent,   NFS3PROC_LOOKUP,  true,  SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_lookup_unsent, NFS3PROC_LOOKUP,  false, SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_access_sent,   NFS3PROC_ACCESS,  true,  SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_access_unsent, NFS3PROC_ACCESS,  false, SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_readdir_sent,  NFS3PROC_READDIR, true,  SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_commit_sent,   NFS3PROC_COMMIT,  true,  SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_fsstat_sent,   NFS3PROC_FSSTAT,  true,  SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_fsinfo_sent,   NFS3PROC_FSINFO,  true,  SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_pathconf_sent, NFS3PROC_PATHCONF,true,  SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_readlink_sent, NFS3PROC_READLINK,true,  SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_top_null_sent,     NFS3PROC_NULL,    true,  SUT_FAILOVER_RETRY)
+
+/* These four were renamed mid-iteration — they don't actually pass
+ * the RPC_TASK_FIXED flag (that's the V3_FIXED_FLAG_TEST batch
+ * below). Without the flag, behaviour is normal: transactional ops
+ * sent → DELAY, idempotent → RETRY. */
+V3_FLAGS_DELAY_TEST(v3_fixed_write_misnamed,    NFS3PROC_WRITE,   true,  SUT_FAILOVER_RETRY_DELAY)
+V3_FLAGS_DELAY_TEST(v3_fixed_setattr_misnamed,  NFS3PROC_SETATTR, true,  SUT_FAILOVER_RETRY_DELAY)
+V3_FLAGS_DELAY_TEST(v3_fixed_read_misnamed,     NFS3PROC_READ,    true,  SUT_FAILOVER_RETRY)
+V3_FLAGS_DELAY_TEST(v3_fixed_getattr_misnamed,  NFS3PROC_GETATTR, true,  SUT_FAILOVER_RETRY)
+
+/* Use a different macro for the FIXED tests to actually pass the flag. */
+#undef V3_FLAGS_DELAY_TEST
+#define V3_FLAGS_DELAY_TEST(name, proc, was_sent, expected) \
+    START_TEST(name) { \
+        struct rpc_clnt *c = make_clnt(3); \
+        struct rpc_procinfo *p = make_proc_v3(proc); \
+        struct rpc_task *t = make_task(c, p, RPC_TASK_FIXED, was_sent); \
+        ck_assert_int_eq(failover_get_retry_policy(t), expected); \
+    } END_TEST
+
+V3_FLAGS_DELAY_TEST(v3_fixed_flag_write,   NFS3PROC_WRITE,   true,  SUT_FAILOVER_NOACTION)
+V3_FLAGS_DELAY_TEST(v3_fixed_flag_setattr, NFS3PROC_SETATTR, true,  SUT_FAILOVER_NOACTION)
+V3_FLAGS_DELAY_TEST(v3_fixed_flag_read,    NFS3PROC_READ,    true,  SUT_FAILOVER_NOACTION)
+V3_FLAGS_DELAY_TEST(v3_fixed_flag_lookup,  NFS3PROC_LOOKUP,  true,  SUT_FAILOVER_NOACTION)
+V3_FLAGS_DELAY_TEST(v3_fixed_flag_create,  NFS3PROC_CREATE,  true,  SUT_FAILOVER_NOACTION)
+V3_FLAGS_DELAY_TEST(v3_fixed_flag_remove,  NFS3PROC_REMOVE,  true,  SUT_FAILOVER_NOACTION)
+V3_FLAGS_DELAY_TEST(v3_fixed_flag_unsent,  NFS3PROC_WRITE,   false, SUT_FAILOVER_NOACTION)
+
+/* v4 cross-product: idempotent ops never promote to RETRY_DELAY. */
+#undef V3_FLAGS_DELAY_TEST
+#define V4_FLAGS_TEST(name, proc, was_sent, expected) \
+    START_TEST(name) { \
+        struct rpc_clnt *c = make_clnt(4); \
+        struct rpc_procinfo *p = make_proc_v4(proc); \
+        struct rpc_task *t = make_task(c, p, 0, was_sent); \
+        ck_assert_int_eq(failover_get_retry_policy(t), expected); \
+    } END_TEST
+
+V4_FLAGS_TEST(v4_top_write_sent,     NFSPROC4_CLNT_WRITE,    true,  SUT_FAILOVER_RETRY_DELAY)
+V4_FLAGS_TEST(v4_top_write_unsent,   NFSPROC4_CLNT_WRITE,    false, SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_setattr_sent,   NFSPROC4_CLNT_SETATTR,  true,  SUT_FAILOVER_RETRY_DELAY)
+V4_FLAGS_TEST(v4_top_setattr_unsent, NFSPROC4_CLNT_SETATTR,  false, SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_create_sent,    NFSPROC4_CLNT_CREATE,   true,  SUT_FAILOVER_RETRY_DELAY)
+V4_FLAGS_TEST(v4_top_remove_sent,    NFSPROC4_CLNT_REMOVE,   true,  SUT_FAILOVER_RETRY_DELAY)
+V4_FLAGS_TEST(v4_top_rename_sent,    NFSPROC4_CLNT_RENAME,   true,  SUT_FAILOVER_RETRY_DELAY)
+V4_FLAGS_TEST(v4_top_link_sent,      NFSPROC4_CLNT_LINK,     true,  SUT_FAILOVER_RETRY_DELAY)
+V4_FLAGS_TEST(v4_top_symlink_sent,   NFSPROC4_CLNT_SYMLINK,  true,  SUT_FAILOVER_RETRY_DELAY)
+V4_FLAGS_TEST(v4_top_setacl_sent,    NFSPROC4_CLNT_SETACL,   true,  SUT_FAILOVER_RETRY_DELAY)
+
+V4_FLAGS_TEST(v4_top_read_sent,      NFSPROC4_CLNT_READ,     true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_read_unsent,    NFSPROC4_CLNT_READ,     false, SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_getattr_sent,   NFSPROC4_CLNT_GETATTR,  true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_open_sent,      NFSPROC4_CLNT_OPEN,     true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_close_sent,     NFSPROC4_CLNT_CLOSE,    true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_lock_sent,      NFSPROC4_CLNT_LOCK,     true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_locku_sent,     NFSPROC4_CLNT_LOCKU,    true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_renew_sent,     NFSPROC4_CLNT_RENEW,    true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_commit_sent,    NFSPROC4_CLNT_COMMIT,   true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_lookup_sent,    NFSPROC4_CLNT_LOOKUP,   true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_access_sent,    NFSPROC4_CLNT_ACCESS,   true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_statfs_sent,    NFSPROC4_CLNT_STATFS,   true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_readdir_sent,   NFSPROC4_CLNT_READDIR,  true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_readlink_sent,  NFSPROC4_CLNT_READLINK, true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_pathconf_sent,  NFSPROC4_CLNT_PATHCONF, true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_getacl_sent,    NFSPROC4_CLNT_GETACL,   true,  SUT_FAILOVER_RETRY)
+V4_FLAGS_TEST(v4_top_delegreturn,    NFSPROC4_CLNT_DELEGRETURN, true, SUT_FAILOVER_RETRY)
+
 /* ============================================================ */
 /* Suite plumbing.                                              */
 /* ============================================================ */
@@ -376,7 +460,68 @@ static Suite *failover_path_suite(void)
     tcase_add_test(tcfx, v3_top_remove_sent);
     tcase_add_test(tcfx, v3_top_link_sent);
     tcase_add_test(tcfx, v3_top_symlink_sent);
+    tcase_add_test(tcfx, v3_top_read_sent);
+    tcase_add_test(tcfx, v3_top_read_unsent);
+    tcase_add_test(tcfx, v3_top_getattr_sent);
+    tcase_add_test(tcfx, v3_top_getattr_unsent);
+    tcase_add_test(tcfx, v3_top_lookup_sent);
+    tcase_add_test(tcfx, v3_top_lookup_unsent);
+    tcase_add_test(tcfx, v3_top_access_sent);
+    tcase_add_test(tcfx, v3_top_access_unsent);
+    tcase_add_test(tcfx, v3_top_readdir_sent);
+    tcase_add_test(tcfx, v3_top_commit_sent);
+    tcase_add_test(tcfx, v3_top_fsstat_sent);
+    tcase_add_test(tcfx, v3_top_fsinfo_sent);
+    tcase_add_test(tcfx, v3_top_pathconf_sent);
+    tcase_add_test(tcfx, v3_top_readlink_sent);
+    tcase_add_test(tcfx, v3_top_null_sent);
+    tcase_add_test(tcfx, v3_fixed_write_misnamed);
+    tcase_add_test(tcfx, v3_fixed_setattr_misnamed);
+    tcase_add_test(tcfx, v3_fixed_read_misnamed);
+    tcase_add_test(tcfx, v3_fixed_getattr_misnamed);
     suite_add_tcase(s, tcfx);
+
+    /* RPC_TASK_FIXED cross-product. */
+    TCase *tcfix = tcase_create("toplevel_v3_fixed_flag");
+    tcase_add_test(tcfix, v3_fixed_flag_write);
+    tcase_add_test(tcfix, v3_fixed_flag_setattr);
+    tcase_add_test(tcfix, v3_fixed_flag_read);
+    tcase_add_test(tcfix, v3_fixed_flag_lookup);
+    tcase_add_test(tcfix, v3_fixed_flag_create);
+    tcase_add_test(tcfix, v3_fixed_flag_remove);
+    tcase_add_test(tcfix, v3_fixed_flag_unsent);
+    suite_add_tcase(s, tcfix);
+
+    /* v4 toplevel-dispatch cross-product. */
+    TCase *tcv4x = tcase_create("toplevel_v4_cross");
+    tcase_add_test(tcv4x, v4_top_write_sent);
+    tcase_add_test(tcv4x, v4_top_write_unsent);
+    tcase_add_test(tcv4x, v4_top_setattr_sent);
+    tcase_add_test(tcv4x, v4_top_setattr_unsent);
+    tcase_add_test(tcv4x, v4_top_create_sent);
+    tcase_add_test(tcv4x, v4_top_remove_sent);
+    tcase_add_test(tcv4x, v4_top_rename_sent);
+    tcase_add_test(tcv4x, v4_top_link_sent);
+    tcase_add_test(tcv4x, v4_top_symlink_sent);
+    tcase_add_test(tcv4x, v4_top_setacl_sent);
+    tcase_add_test(tcv4x, v4_top_read_sent);
+    tcase_add_test(tcv4x, v4_top_read_unsent);
+    tcase_add_test(tcv4x, v4_top_getattr_sent);
+    tcase_add_test(tcv4x, v4_top_open_sent);
+    tcase_add_test(tcv4x, v4_top_close_sent);
+    tcase_add_test(tcv4x, v4_top_lock_sent);
+    tcase_add_test(tcv4x, v4_top_locku_sent);
+    tcase_add_test(tcv4x, v4_top_renew_sent);
+    tcase_add_test(tcv4x, v4_top_commit_sent);
+    tcase_add_test(tcv4x, v4_top_lookup_sent);
+    tcase_add_test(tcv4x, v4_top_access_sent);
+    tcase_add_test(tcv4x, v4_top_statfs_sent);
+    tcase_add_test(tcv4x, v4_top_readdir_sent);
+    tcase_add_test(tcv4x, v4_top_readlink_sent);
+    tcase_add_test(tcv4x, v4_top_pathconf_sent);
+    tcase_add_test(tcv4x, v4_top_getacl_sent);
+    tcase_add_test(tcv4x, v4_top_delegreturn);
+    suite_add_tcase(s, tcv4x);
 
     return s;
 }
