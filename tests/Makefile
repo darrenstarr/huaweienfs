@@ -93,10 +93,18 @@ LDLIBS := $(CHECK_LIBS) -lpthread
 # and defining ENFS_SRC_<name> and STUBS_<name>.
 # ---------------------------------------------------------------------
 
-TESTS := test_enfs_roundrobin test_enfs_multipath_parse
+TESTS := test_enfs_roundrobin test_enfs_multipath_parse test_loadbalance_simulator
 
 ENFS_SRC_test_enfs_roundrobin := $(ENFS_SRC_ROOT)/enfs_roundrobin.c
 STUBS_test_enfs_roundrobin    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_deps_stubs.c
+
+# Load-balancing simulator. Reuses enfs_roundrobin.c as the source
+# under test (same dispatcher, same shim layer). The test asserts
+# workload-level distribution properties — over many dispatches each
+# healthy xprt carries its fair share — which the per-call tests in
+# test_enfs_roundrobin.c don't cover.
+ENFS_SRC_test_loadbalance_simulator := $(ENFS_SRC_ROOT)/enfs_roundrobin.c
+STUBS_test_loadbalance_simulator    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_deps_stubs.c
 
 # Address-list parser. Covers BOTH IPv4 (the production target for
 # customer storage) and IPv6 (the project lab fabric). Uses libc-
