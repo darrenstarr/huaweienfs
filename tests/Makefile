@@ -54,6 +54,8 @@ CFLAGS_COMMON := \
     -I $(SHIM_DIR) \
     -I $(HEADERS_DIR) \
     -I $(ENFS_SRC_ROOT) \
+    -I $(ESUNRPC_INC_ROOT) \
+    -I $(ESUNRPC_SRC_ROOT) \
     -Wall -Wno-unused-parameter -Wno-unused-function \
     -Wno-pointer-arith -Wno-pragmas -Wno-comment
 
@@ -98,6 +100,9 @@ LDLIBS := $(CHECK_LIBS) -lpthread
 TESTS := test_enfs_roundrobin test_enfs_multipath_parse test_loadbalance_simulator \
          test_pm_state test_failover_path test_enfs_path \
          test_esunrpc_timer test_esunrpc_addr
+# test_esunrpc_xprtmultipath: needs more shim work (kobject, full
+# rpc_xprt, RPC_DISPLAY_*, idr); test source kept on disk, suite
+# TBD-enabled once shim is built out. Tracked as a follow-up issue.
 
 ENFS_SRC_test_enfs_roundrobin := $(ENFS_SRC_ROOT)/enfs_roundrobin.c
 STUBS_test_enfs_roundrobin    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_deps_stubs.c
@@ -139,6 +144,13 @@ STUBS_test_esunrpc_timer    := $(STUBS_DIR)/kernel_stubs.c
 # transformation; backed by the same in[46]_pton stubs as pm_state.
 ENFS_SRC_test_esunrpc_addr := $(ESUNRPC_SRC_ROOT)/addr.c
 STUBS_test_esunrpc_addr    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/esunrpc_addr_stubs.c
+
+# esunrpc_xprtmultipath: multipath transport switch + iter ops.
+# Drives the lifecycle: alloc, get/put, add/remove, set_roundrobin,
+# iter_init/destroy, get_next traversal.
+ENFS_SRC_test_esunrpc_xprtmultipath := $(ESUNRPC_SRC_ROOT)/xprtmultipath.c
+STUBS_test_esunrpc_xprtmultipath    := $(STUBS_DIR)/kernel_stubs.c \
+                                        $(STUBS_DIR)/esunrpc_xprtmultipath_stubs.c
 
 # Address-list parser. Covers BOTH IPv4 (the production target for
 # customer storage) and IPv6 (the project lab fabric). Uses libc-
