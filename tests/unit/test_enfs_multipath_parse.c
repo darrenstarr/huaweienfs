@@ -36,6 +36,8 @@ int nfs_multipath_parse_options_check_duplicate(
 int nfs_multipath_parse_ip_list(char *buffer, struct net *net_ns,
                                 struct multipath_mount_options *options,
                                 enum nfsmultipathoptions type);
+bool isInvalidDns(char *cursor, struct net *net_ns);
+bool enfs_valid_dns(const char *s);
 
 /* ---------------------------------------------------------------- */
 /* Test helpers.                                                    */
@@ -948,6 +950,145 @@ V6_RANGE_LEN_TEST(v6r_p_16, "2001:db8::1", "2001:db8::10", 16)
 V6_RANGE_LEN_TEST(v6r_p_20, "2001:db8::1", "2001:db8::14", 20)
 
 /* ---------------------------------------------------------------- */
+/* DNS validation: enfs_valid_dns + isInvalidDns.                  */
+/* ---------------------------------------------------------------- */
+
+#define DNS_VALID_TEST(name, s) \
+    START_TEST(name) { ck_assert(enfs_valid_dns(s)); } END_TEST
+
+#define DNS_INVALID_TEST(name, s) \
+    START_TEST(name) { ck_assert(!enfs_valid_dns(s)); } END_TEST
+
+/* Accept battery — every form a customer realistically uses. */
+DNS_VALID_TEST(dns_v_simple,         "host")
+DNS_VALID_TEST(dns_v_two_label,      "host.example")
+DNS_VALID_TEST(dns_v_three_label,    "host.example.com")
+DNS_VALID_TEST(dns_v_long,           "very-long-hostname.subdomain.example.com")
+/* Underscore-prefixed labels (RFC 6335 SRV-style) are REJECTED by
+ * the SUT: enfs_valid_dns enforces RFC 952 LDH-with-alnum-edges
+ * which forbids leading underscore. _dns is a typical SRV label
+ * but enfs treats it as invalid. Documented as a lenient-validation
+ * gap consistent with #43. */
+DNS_INVALID_TEST(dns_iv_underscore_lead, "_dns._udp.example.com")
+DNS_VALID_TEST(dns_v_hyphenated,     "host-1.example.com")
+DNS_VALID_TEST(dns_v_numeric_label,  "1host.example.com")
+DNS_VALID_TEST(dns_v_label_ending_digit, "hostname1.example.com")
+DNS_VALID_TEST(dns_v_one_char,       "a")
+DNS_VALID_TEST(dns_v_one_digit,      "9")
+DNS_VALID_TEST(dns_v_mixed_alnum,    "h0st-name.exam-ple.c0m")
+DNS_VALID_TEST(dns_v_uppercase,      "HOST.EXAMPLE.COM")
+DNS_VALID_TEST(dns_v_mixed_case,     "Host.Example.Com")
+DNS_VALID_TEST(dns_v_storage_node,   "storage-node-1.cluster.local")
+DNS_VALID_TEST(dns_v_oceanstor,      "oceanstor.lab.example")
+
+/* Reject battery — DNS RFC 1035 boundary violations. */
+DNS_INVALID_TEST(dns_iv_empty,           "")
+DNS_INVALID_TEST(dns_iv_leading_dot,     ".example.com")
+DNS_INVALID_TEST(dns_iv_trailing_dot,    "example.com.")
+DNS_INVALID_TEST(dns_iv_double_dot,      "host..example.com")
+DNS_INVALID_TEST(dns_iv_just_dot,        ".")
+DNS_INVALID_TEST(dns_iv_just_dash,       "-")
+DNS_INVALID_TEST(dns_iv_label_starts_dash,  "-host.example.com")
+DNS_INVALID_TEST(dns_iv_label_ends_dash,    "host-.example.com")
+DNS_INVALID_TEST(dns_iv_label_starts_dot,   ".example")
+DNS_INVALID_TEST(dns_iv_invalid_char_at,    "host@example.com")
+DNS_INVALID_TEST(dns_iv_invalid_char_slash, "host/example.com")
+DNS_INVALID_TEST(dns_iv_invalid_char_space, "host name.example.com")
+DNS_INVALID_TEST(dns_iv_invalid_char_colon, "host:example.com")
+DNS_INVALID_TEST(dns_iv_invalid_char_bang,  "host!.example.com")
+DNS_INVALID_TEST(dns_iv_invalid_char_eq,    "host=name.example")
+DNS_INVALID_TEST(dns_iv_invalid_char_quest, "host?.example")
+DNS_INVALID_TEST(dns_iv_invalid_char_amp,   "host&example")
+DNS_INVALID_TEST(dns_iv_invalid_char_pct,   "host%name")
+DNS_INVALID_TEST(dns_iv_invalid_char_caret, "host^example")
+
+/* Length boundaries: total > 255 chars, label > 63 chars. */
+START_TEST(dns_iv_total_too_long) {
+    char s[260];
+    memset(s, 'a', 256);
+    s[256] = '\0';
+    ck_assert(!enfs_valid_dns(s));
+} END_TEST
+
+START_TEST(dns_v_total_at_max) {
+    char s[256];
+    /* 9-char labels separated by dots. 9 + 1 = 10 chars per label.
+     * 25 labels = 250 chars + 24 dots = 274. Too long. Use 6+1 = 7
+     * with 36 = 252 chars + 35 dots = 287. Hmm.
+     * Let's just build a plain label of 255 chars (max single label is 63
+     * so we need to multi-label). 25 labels of "abcde123" (8 chars) +
+     * 24 dots = 200 + 24 = 224. Boundary is < 256 inclusive of trailing
+     * NUL... use 253 chars total. */
+    memset(s, 'a', 63); s[63]='.';
+    memset(s+64, 'a', 63); s[127]='.';
+    memset(s+128, 'a', 63); s[191]='.';
+    memset(s+192, 'a', 61); s[253]='\0';
+    ck_assert(enfs_valid_dns(s));
+} END_TEST
+
+START_TEST(dns_iv_label_too_long) {
+    /* One label > 63 chars. */
+    char s[80];
+    memset(s, 'a', 64);
+    s[64] = '\0';
+    ck_assert(!enfs_valid_dns(s));
+} END_TEST
+
+START_TEST(dns_v_label_at_max_63) {
+    char s[80];
+    memset(s, 'a', 63);
+    s[63] = '\0';
+    ck_assert(enfs_valid_dns(s));
+} END_TEST
+
+/* isInvalidDns: returns true for invalid DNS, false for valid.
+ * It first checks if the string is actually a valid IP (and rejects
+ * it if so — IPs go through enfs_parse_ip_single, not the DNS path). */
+START_TEST(invdns_valid_dns_string_returns_false) {
+    char s[] = "host.example.com";
+    ck_assert(!isInvalidDns(s, NULL));
+} END_TEST
+
+START_TEST(invdns_invalid_string_returns_true) {
+    char s[] = "host..example";
+    ck_assert(isInvalidDns(s, NULL));
+} END_TEST
+
+START_TEST(invdns_v4_address_returns_true) {
+    /* "10.0.0.1" parses as a valid IPv4 → SUT rejects it as DNS. */
+    char s[] = "10.0.0.1";
+    ck_assert(isInvalidDns(s, NULL));
+} END_TEST
+
+START_TEST(invdns_v6_address_returns_true) {
+    char s[] = "2001:db8::1";
+    /* IPv6 addresses contain `:` which is not a valid DNS char,
+     * so enfs_valid_dns rejects it (so isInvalidDns returns true). */
+    ck_assert(isInvalidDns(s, NULL));
+} END_TEST
+
+START_TEST(invdns_empty_string_returns_true) {
+    char s[] = "";
+    ck_assert(isInvalidDns(s, NULL));
+} END_TEST
+
+START_TEST(invdns_dash_in_dns_segment_handled) {
+    /* The SUT splits on '-' and checks if first half is a valid IP.
+     * "10.0.0.1-host" — first half is valid IP → SUT returns true. */
+    char s[] = "10.0.0.1-host";
+    ck_assert(isInvalidDns(s, NULL));
+} END_TEST
+
+/* DNS-formed labels with various legal patterns */
+DNS_VALID_TEST(dns_v_idn_lookalike_xn,    "xn--abc123.example.com")
+DNS_VALID_TEST(dns_v_kubernetes_pod_name, "pod-12345.namespace.svc.cluster.local")
+DNS_VALID_TEST(dns_v_aws_internal,        "ip-10-0-0-1.ec2.internal")
+DNS_VALID_TEST(dns_v_short_two_chars,     "ab")
+DNS_VALID_TEST(dns_v_short_two_digits,    "99")
+/* Same edge-rule: _test is rejected. */
+DNS_INVALID_TEST(dns_iv_underscore_only_label, "_test")
+
+/* ---------------------------------------------------------------- */
 /* Suite.                                                           */
 /* ---------------------------------------------------------------- */
 
@@ -1183,6 +1324,65 @@ static Suite *parse_suite(void)
     tcase_add_test(tcrng, v6r_p_16);
     tcase_add_test(tcrng, v6r_p_20);
     suite_add_tcase(s, tcrng);
+
+    TCase *tcdns_v = tcase_create("dns_valid");
+    tcase_add_test(tcdns_v, dns_v_simple);
+    tcase_add_test(tcdns_v, dns_v_two_label);
+    tcase_add_test(tcdns_v, dns_v_three_label);
+    tcase_add_test(tcdns_v, dns_v_long);
+    tcase_add_test(tcdns_v, dns_v_hyphenated);
+    tcase_add_test(tcdns_v, dns_v_numeric_label);
+    tcase_add_test(tcdns_v, dns_v_label_ending_digit);
+    tcase_add_test(tcdns_v, dns_v_one_char);
+    tcase_add_test(tcdns_v, dns_v_one_digit);
+    tcase_add_test(tcdns_v, dns_v_mixed_alnum);
+    tcase_add_test(tcdns_v, dns_v_uppercase);
+    tcase_add_test(tcdns_v, dns_v_mixed_case);
+    tcase_add_test(tcdns_v, dns_v_storage_node);
+    tcase_add_test(tcdns_v, dns_v_oceanstor);
+    tcase_add_test(tcdns_v, dns_v_idn_lookalike_xn);
+    tcase_add_test(tcdns_v, dns_v_kubernetes_pod_name);
+    tcase_add_test(tcdns_v, dns_v_aws_internal);
+    tcase_add_test(tcdns_v, dns_v_short_two_chars);
+    tcase_add_test(tcdns_v, dns_v_short_two_digits);
+    tcase_add_test(tcdns_v, dns_v_total_at_max);
+    tcase_add_test(tcdns_v, dns_v_label_at_max_63);
+    suite_add_tcase(s, tcdns_v);
+
+    TCase *tcdns_iv = tcase_create("dns_invalid");
+    tcase_add_test(tcdns_iv, dns_iv_empty);
+    tcase_add_test(tcdns_iv, dns_iv_leading_dot);
+    tcase_add_test(tcdns_iv, dns_iv_trailing_dot);
+    tcase_add_test(tcdns_iv, dns_iv_double_dot);
+    tcase_add_test(tcdns_iv, dns_iv_just_dot);
+    tcase_add_test(tcdns_iv, dns_iv_just_dash);
+    tcase_add_test(tcdns_iv, dns_iv_label_starts_dash);
+    tcase_add_test(tcdns_iv, dns_iv_label_ends_dash);
+    tcase_add_test(tcdns_iv, dns_iv_label_starts_dot);
+    tcase_add_test(tcdns_iv, dns_iv_invalid_char_at);
+    tcase_add_test(tcdns_iv, dns_iv_invalid_char_slash);
+    tcase_add_test(tcdns_iv, dns_iv_invalid_char_space);
+    tcase_add_test(tcdns_iv, dns_iv_invalid_char_colon);
+    tcase_add_test(tcdns_iv, dns_iv_invalid_char_bang);
+    tcase_add_test(tcdns_iv, dns_iv_invalid_char_eq);
+    tcase_add_test(tcdns_iv, dns_iv_invalid_char_quest);
+    tcase_add_test(tcdns_iv, dns_iv_invalid_char_amp);
+    tcase_add_test(tcdns_iv, dns_iv_invalid_char_pct);
+    tcase_add_test(tcdns_iv, dns_iv_invalid_char_caret);
+    tcase_add_test(tcdns_iv, dns_iv_total_too_long);
+    tcase_add_test(tcdns_iv, dns_iv_label_too_long);
+    tcase_add_test(tcdns_iv, dns_iv_underscore_lead);
+    tcase_add_test(tcdns_iv, dns_iv_underscore_only_label);
+    suite_add_tcase(s, tcdns_iv);
+
+    TCase *tcinv = tcase_create("isInvalidDns");
+    tcase_add_test(tcinv, invdns_valid_dns_string_returns_false);
+    tcase_add_test(tcinv, invdns_invalid_string_returns_true);
+    tcase_add_test(tcinv, invdns_v4_address_returns_true);
+    tcase_add_test(tcinv, invdns_v6_address_returns_true);
+    tcase_add_test(tcinv, invdns_empty_string_returns_true);
+    tcase_add_test(tcinv, invdns_dash_in_dns_segment_handled);
+    suite_add_tcase(s, tcinv);
 
     return s;
 }
