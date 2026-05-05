@@ -614,6 +614,141 @@ START_TEST(native_down_N_48)  { run_native_link_main_skipped(48, 47000); } END_T
 START_TEST(native_down_N_64)  { run_native_link_main_skipped(64, 63000); } END_TEST
 
 /* ================================================================ */
+/* Two-failure patterns at N=16. DISP=14000 → 14000/14 = 1000. */
+/* ================================================================ */
+
+#define FAIL2_16(name, a, b) \
+    START_TEST(name) { \
+        unsigned int d[]={(a),(b)}; \
+        run_with_K_down(16, 2, d, 14000); \
+    } END_TEST
+
+FAIL2_16(fail2_1_2_of_16,    1,  2)
+FAIL2_16(fail2_2_3_of_16,    2,  3)
+FAIL2_16(fail2_3_4_of_16,    3,  4)
+FAIL2_16(fail2_7_8_of_16,    7,  8)
+FAIL2_16(fail2_14_15_of_16, 14, 15)
+FAIL2_16(fail2_1_15_of_16,   1, 15)
+FAIL2_16(fail2_2_8_of_16,    2,  8)
+FAIL2_16(fail2_3_11_of_16,   3, 11)
+FAIL2_16(fail2_5_10_of_16,   5, 10)
+FAIL2_16(fail2_6_9_of_16,    6,  9)
+FAIL2_16(fail2_4_12_of_16,   4, 12)
+FAIL2_16(fail2_2_15_of_16,   2, 15)
+
+/* ================================================================ */
+/* Three-failure patterns at N=16. DISP=9100 → 9100/13 = 700. */
+/* ================================================================ */
+
+#define FAIL3_16(name, a, b, c) \
+    START_TEST(name) { \
+        unsigned int d[]={(a),(b),(c)}; \
+        run_with_K_down(16, 3, d, 9100); \
+    } END_TEST
+
+FAIL3_16(fail3_1_2_3_of_16,     1,  2,  3)
+FAIL3_16(fail3_4_5_6_of_16,     4,  5,  6)
+FAIL3_16(fail3_13_14_15_of_16, 13, 14, 15)
+FAIL3_16(fail3_1_8_15_of_16,    1,  8, 15)
+FAIL3_16(fail3_2_4_6_of_16,     2,  4,  6)
+FAIL3_16(fail3_3_7_11_of_16,    3,  7, 11)
+FAIL3_16(fail3_2_3_15_of_16,    2,  3, 15)
+FAIL3_16(fail3_1_15_14_of_16,   1, 15, 14)
+
+/* ================================================================ */
+/* Failure-density tests: half down, three-quarters down, just one  */
+/* survivor. */
+/* ================================================================ */
+
+START_TEST(density_half_N16) {
+    /* 8 down, 8 up. DISP=8000 → 8000/8 = 1000 each. Indices 1,3,5,...15. */
+    unsigned int d[] = {1, 3, 5, 7, 9, 11, 13, 15};
+    run_with_K_down(16, 8, d, 8000);
+} END_TEST
+
+START_TEST(density_half_N32) {
+    /* 16 down, 16 up. Even indices down (skip 0 = main). */
+    unsigned int d[16];
+    for (int i = 0; i < 16; i++) d[i] = (unsigned int)((i + 1) * 2 - 1);
+    run_with_K_down(32, 16, d, 16000);
+} END_TEST
+
+START_TEST(density_threequarters_N16) {
+    /* 12 down, 4 up. DISP=4000 → 4000/4 = 1000. */
+    unsigned int d[] = {1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15};
+    run_with_K_down(16, 12, d, 4000);
+} END_TEST
+
+START_TEST(density_only_one_healthy_N16) {
+    /* 15 down. Only main (idx 0) is up → all 5000 calls land on main. */
+    unsigned int d[15];
+    for (int i = 0; i < 15; i++) d[i] = (unsigned int)(i + 1);
+    run_with_K_down(16, 15, d, 5000);
+} END_TEST
+
+START_TEST(density_only_one_healthy_N32) {
+    unsigned int d[31];
+    for (int i = 0; i < 31; i++) d[i] = (unsigned int)(i + 1);
+    run_with_K_down(32, 31, d, 5000);
+} END_TEST
+
+/* ================================================================ */
+/* Huge-N perfect distribution. 300, 400, 500, 512.                 */
+/* ================================================================ */
+
+START_TEST(perfect_dist_N_300) {
+    struct rpc_xprt_switch *xps = lb_make_xps();
+    struct rpc_xprt **xs = calloc(300, sizeof(*xs));
+    for (int i = 0; i < 300; i++) {
+        xs[i] = lb_make_xprt(i == 0, PM_STATE_NORMAL);
+        lb_xps_add(xps, xs[i]);
+    }
+    lb_dispatch_n(xps, 300 * 10);
+    for (int i = 0; i < 300; i++)
+        ck_assert_uint_eq(lb_picks(xs[i]), 10);
+    free(xs);
+} END_TEST
+
+START_TEST(perfect_dist_N_400) {
+    struct rpc_xprt_switch *xps = lb_make_xps();
+    struct rpc_xprt **xs = calloc(400, sizeof(*xs));
+    for (int i = 0; i < 400; i++) {
+        xs[i] = lb_make_xprt(i == 0, PM_STATE_NORMAL);
+        lb_xps_add(xps, xs[i]);
+    }
+    lb_dispatch_n(xps, 400 * 5);
+    for (int i = 0; i < 400; i++)
+        ck_assert_uint_eq(lb_picks(xs[i]), 5);
+    free(xs);
+} END_TEST
+
+START_TEST(perfect_dist_N_500) {
+    struct rpc_xprt_switch *xps = lb_make_xps();
+    struct rpc_xprt **xs = calloc(500, sizeof(*xs));
+    for (int i = 0; i < 500; i++) {
+        xs[i] = lb_make_xprt(i == 0, PM_STATE_NORMAL);
+        lb_xps_add(xps, xs[i]);
+    }
+    lb_dispatch_n(xps, 500 * 4);
+    for (int i = 0; i < 500; i++)
+        ck_assert_uint_eq(lb_picks(xs[i]), 4);
+    free(xs);
+} END_TEST
+
+START_TEST(perfect_dist_N_512) {
+    struct rpc_xprt_switch *xps = lb_make_xps();
+    struct rpc_xprt **xs = calloc(512, sizeof(*xs));
+    for (int i = 0; i < 512; i++) {
+        xs[i] = lb_make_xprt(i == 0, PM_STATE_NORMAL);
+        lb_xps_add(xps, xs[i]);
+    }
+    lb_dispatch_n(xps, 512 * 4);
+    for (int i = 0; i < 512; i++)
+        ck_assert_uint_eq(lb_picks(xs[i]), 4);
+    free(xs);
+} END_TEST
+
+/* ================================================================ */
 /* Suite plumbing.                                                  */
 /* ================================================================ */
 
@@ -763,6 +898,57 @@ static Suite *loadbalance_suite(void)
     tcase_add_test(tc_nd2, native_down_N_48);
     tcase_add_test(tc_nd2, native_down_N_64);
     suite_add_tcase(s, tc_nd2);
+
+    /* Two-failure patterns at N=16: every adjacent + non-adjacent
+     * combo over a representative sample. DISP picked so DISP /
+     * (16-2) = clean integer to avoid bucket-rounding noise. */
+    TCase *tc_f2_16 = tcase_create("two_failures_at_N16");
+    tcase_add_checked_fixture(tc_f2_16, setup, teardown);
+    tcase_add_test(tc_f2_16, fail2_1_2_of_16);
+    tcase_add_test(tc_f2_16, fail2_2_3_of_16);
+    tcase_add_test(tc_f2_16, fail2_3_4_of_16);
+    tcase_add_test(tc_f2_16, fail2_7_8_of_16);
+    tcase_add_test(tc_f2_16, fail2_14_15_of_16);
+    tcase_add_test(tc_f2_16, fail2_1_15_of_16);
+    tcase_add_test(tc_f2_16, fail2_2_8_of_16);
+    tcase_add_test(tc_f2_16, fail2_3_11_of_16);
+    tcase_add_test(tc_f2_16, fail2_5_10_of_16);
+    tcase_add_test(tc_f2_16, fail2_6_9_of_16);
+    tcase_add_test(tc_f2_16, fail2_4_12_of_16);
+    tcase_add_test(tc_f2_16, fail2_2_15_of_16);
+    suite_add_tcase(s, tc_f2_16);
+
+    /* Three-failure patterns at N=16. DISP = 9100 → 9100/13 = 700. */
+    TCase *tc_f3_16 = tcase_create("three_failures_at_N16");
+    tcase_add_checked_fixture(tc_f3_16, setup, teardown);
+    tcase_add_test(tc_f3_16, fail3_1_2_3_of_16);
+    tcase_add_test(tc_f3_16, fail3_4_5_6_of_16);
+    tcase_add_test(tc_f3_16, fail3_13_14_15_of_16);
+    tcase_add_test(tc_f3_16, fail3_1_8_15_of_16);
+    tcase_add_test(tc_f3_16, fail3_2_4_6_of_16);
+    tcase_add_test(tc_f3_16, fail3_3_7_11_of_16);
+    tcase_add_test(tc_f3_16, fail3_2_3_15_of_16);
+    tcase_add_test(tc_f3_16, fail3_1_15_14_of_16);
+    suite_add_tcase(s, tc_f3_16);
+
+    /* Half-down and three-quarters-down density tests. */
+    TCase *tc_density = tcase_create("failure_density");
+    tcase_add_checked_fixture(tc_density, setup, teardown);
+    tcase_add_test(tc_density, density_half_N16);
+    tcase_add_test(tc_density, density_half_N32);
+    tcase_add_test(tc_density, density_threequarters_N16);
+    tcase_add_test(tc_density, density_only_one_healthy_N16);
+    tcase_add_test(tc_density, density_only_one_healthy_N32);
+    suite_add_tcase(s, tc_density);
+
+    /* Larger-N perfect distribution beyond the existing tests. */
+    TCase *tc_n3 = tcase_create("perfect_distribution_huge_N");
+    tcase_add_checked_fixture(tc_n3, setup, teardown);
+    tcase_add_test(tc_n3, perfect_dist_N_300);
+    tcase_add_test(tc_n3, perfect_dist_N_400);
+    tcase_add_test(tc_n3, perfect_dist_N_500);
+    tcase_add_test(tc_n3, perfect_dist_N_512);
+    suite_add_tcase(s, tc_n3);
 
     return s;
 }
