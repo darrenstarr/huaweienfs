@@ -265,6 +265,350 @@ START_TEST(cross_list_duplicate_v6_detected)
 }
 END_TEST
 
+/* ================================================================ */
+/* IPv4: comprehensive validity + edge-case battery.                */
+/*                                                                  */
+/* IMPORTANT — the SUT's validator is intentionally LENIENT:        */
+/*   - rejects only 0.0.0.0 and 255.255.255.255                     */
+/*   - accepts everything else, including 127.0.0.0/8 (loopback),   */
+/*     224.0.0.0/4 (multicast), and 169.254.0.0/16 (link-local)     */
+/*                                                                  */
+/* These tests document the observed behaviour. The leniency around */
+/* loopback / multicast / link-local is filed as a follow-up issue  */
+/* — passing 127.0.0.1 as a remoteaddr would produce bizarre but    */
+/* not impossible mounts; it ought to be rejected by the validator. */
+/* ================================================================ */
+
+static int v4_valid_accepts(const char *s) {
+    struct sockaddr_in a = v4_addr(s);
+    return nfs_multipath_parse_options_check_ipv4_valid(&a) == 0;
+}
+static int v4_valid_rejects(const char *s) {
+    struct sockaddr_in a = v4_addr(s);
+    return nfs_multipath_parse_options_check_ipv4_valid(&a) != 0;
+}
+
+#define V4_ACCEPT_TEST(name, addr) \
+    START_TEST(name) { ck_assert(v4_valid_accepts(addr)); } END_TEST
+#define V4_REJECT_TEST(name, addr) \
+    START_TEST(name) { ck_assert(v4_valid_rejects(addr)); } END_TEST
+
+V4_ACCEPT_TEST(v4_accept_192_0_2_10,    "192.0.2.10")
+V4_ACCEPT_TEST(v4_accept_192_0_2_1,     "192.0.2.1")
+V4_ACCEPT_TEST(v4_accept_192_0_2_254,   "192.0.2.254")
+V4_ACCEPT_TEST(v4_accept_198_51_100_5,  "198.51.100.5")
+V4_ACCEPT_TEST(v4_accept_203_0_113_99,  "203.0.113.99")
+V4_ACCEPT_TEST(v4_accept_10_0_0_1,      "10.0.0.1")
+V4_ACCEPT_TEST(v4_accept_172_16_0_1,    "172.16.0.1")
+V4_ACCEPT_TEST(v4_accept_192_168_1_1,   "192.168.1.1")
+V4_ACCEPT_TEST(v4_accept_8_8_8_8,       "8.8.8.8")
+V4_ACCEPT_TEST(v4_accept_1_1_1_1,       "1.1.1.1")
+
+V4_REJECT_TEST(v4_reject_0_0_0_0,         "0.0.0.0")
+V4_REJECT_TEST(v4_reject_255_255_255_255, "255.255.255.255")
+
+/* Documenting current (lenient) behaviour — these are ACCEPTED.
+ * If/when issue tracking the validator hardening is fixed, flip
+ * these to REJECT_TEST. */
+V4_ACCEPT_TEST(v4_lenient_accept_127_0_0_1,       "127.0.0.1")
+V4_ACCEPT_TEST(v4_lenient_accept_127_5_5_5,       "127.5.5.5")
+V4_ACCEPT_TEST(v4_lenient_accept_127_255_255_254, "127.255.255.254")
+V4_ACCEPT_TEST(v4_lenient_accept_224_0_0_1,       "224.0.0.1")
+V4_ACCEPT_TEST(v4_lenient_accept_224_5_6_7,       "224.5.6.7")
+V4_ACCEPT_TEST(v4_lenient_accept_239_255_255_255, "239.255.255.255")
+V4_ACCEPT_TEST(v4_lenient_accept_169_254_0_1,     "169.254.0.1")
+V4_ACCEPT_TEST(v4_lenient_accept_169_254_99_99,   "169.254.99.99")
+
+/* IPv4 parsing of malformed inputs at enfs_parse_ip_single. */
+#define V4_PARSE_REJECT_TEST(name, str) \
+    START_TEST(name) { \
+        struct nfs_ip_list *l = fresh_list(); \
+        int rc = enfs_parse_ip_single(l, NULL, str, REMOTEADDR); \
+        ck_assert_int_ne(rc, 0); \
+        free(l); \
+    } END_TEST
+
+V4_PARSE_REJECT_TEST(v4_reject_str_empty,           "")
+V4_PARSE_REJECT_TEST(v4_reject_str_999_dot_999,     "999.999.999.999")
+V4_PARSE_REJECT_TEST(v4_reject_str_only_dots,       "...")
+V4_PARSE_REJECT_TEST(v4_reject_str_letters,         "abcd")
+V4_PARSE_REJECT_TEST(v4_reject_str_too_many_octets, "1.2.3.4.5")
+V4_PARSE_REJECT_TEST(v4_reject_str_too_few_octets,  "1.2.3")
+V4_PARSE_REJECT_TEST(v4_reject_str_negative_octet,  "192.0.2.-1")
+V4_PARSE_REJECT_TEST(v4_reject_str_huge_octet,      "192.0.2.99999")
+V4_PARSE_REJECT_TEST(v4_reject_str_trailing_dot,    "192.0.2.10.")
+V4_PARSE_REJECT_TEST(v4_reject_str_leading_dot,     ".192.0.2.10")
+
+/* Many parses succeed for individual addresses. */
+#define V4_PARSE_ACCEPT_TEST(name, str) \
+    START_TEST(name) { \
+        struct nfs_ip_list *l = fresh_list(); \
+        int rc = enfs_parse_ip_single(l, NULL, str, REMOTEADDR); \
+        ck_assert_int_eq(rc, 0); \
+        ck_assert_int_eq(l->count, 1); \
+        ck_assert_int_eq(l->address[0].ss_family, AF_INET); \
+        free(l); \
+    } END_TEST
+
+V4_PARSE_ACCEPT_TEST(v4_parse_192_0_2_10,    "192.0.2.10")
+V4_PARSE_ACCEPT_TEST(v4_parse_198_51_100_99, "198.51.100.99")
+V4_PARSE_ACCEPT_TEST(v4_parse_10_20_30_40,   "10.20.30.40")
+V4_PARSE_ACCEPT_TEST(v4_parse_192_168_1_1,   "192.168.1.1")
+V4_PARSE_ACCEPT_TEST(v4_parse_172_16_5_5,    "172.16.5.5")
+
+/* List parsing — different counts, all valid. */
+START_TEST(v4_list_count_2) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "192.0.2.10~192.0.2.11";
+    ck_assert_int_eq(nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR), 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 2);
+} END_TEST
+START_TEST(v4_list_count_4) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "192.0.2.10~192.0.2.11~192.0.2.12~192.0.2.13";
+    ck_assert_int_eq(nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR), 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 4);
+} END_TEST
+START_TEST(v4_list_count_8) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "10.0.0.1~10.0.0.2~10.0.0.3~10.0.0.4~"
+                   "10.0.0.5~10.0.0.6~10.0.0.7~10.0.0.8";
+    ck_assert_int_eq(nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR), 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 8);
+} END_TEST
+START_TEST(v4_list_count_16) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "10.0.0.1~10.0.0.2~10.0.0.3~10.0.0.4~"
+                   "10.0.0.5~10.0.0.6~10.0.0.7~10.0.0.8~"
+                   "10.0.0.9~10.0.0.10~10.0.0.11~10.0.0.12~"
+                   "10.0.0.13~10.0.0.14~10.0.0.15~10.0.0.16";
+    ck_assert_int_eq(nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR), 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 16);
+} END_TEST
+START_TEST(v4_list_one_invalid_aborts) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "192.0.2.10~not-a-valid-ip~192.0.2.12";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_ne(rc, 0);
+} END_TEST
+
+/* ================================================================ */
+/* IPv6: comprehensive accept/reject + parse cases.                 */
+/* ================================================================ */
+
+static int v6_valid_accepts(const char *s) {
+    struct sockaddr_in6 a = v6_addr(s);
+    return nfs_multipath_parse_options_check_ipv6_valid(&a) == 0;
+}
+static int v6_valid_rejects(const char *s) {
+    struct sockaddr_in6 a = v6_addr(s);
+    return nfs_multipath_parse_options_check_ipv6_valid(&a) != 0;
+}
+
+#define V6_ACCEPT_TEST(name, addr) \
+    START_TEST(name) { ck_assert(v6_valid_accepts(addr)); } END_TEST
+#define V6_REJECT_TEST(name, addr) \
+    START_TEST(name) { ck_assert(v6_valid_rejects(addr)); } END_TEST
+
+V6_ACCEPT_TEST(v6_accept_2001_db8_2_11,        "2001:db8:2::11")
+V6_ACCEPT_TEST(v6_accept_2001_db8_2_18,        "2001:db8:2::18")
+V6_ACCEPT_TEST(v6_accept_2001_db8_full_form,   "2001:0db8:0002:0000:0000:0000:0000:0011")
+V6_ACCEPT_TEST(v6_accept_fc00_ula,             "fc00::1")
+V6_ACCEPT_TEST(v6_accept_fd00_ula,             "fd00::1")
+V6_ACCEPT_TEST(v6_accept_fc07_2_4_1,           "fc07:2::4:1")
+V6_ACCEPT_TEST(v6_accept_fc07_2_4_2,           "fc07:2::4:2")
+V6_ACCEPT_TEST(v6_accept_2620_routable,        "2620:0:1234::5")
+V6_ACCEPT_TEST(v6_accept_2400_routable,        "2400::1")
+
+V6_REJECT_TEST(v6_reject_unspecified_colon_colon, "::")
+/* All other v6 addresses are accepted by the SUT (only :: and ::ffff
+ * variants of all-zeros / all-ones are rejected). Document. */
+V6_ACCEPT_TEST(v6_lenient_accept_loopback,           "::1")
+V6_ACCEPT_TEST(v6_lenient_accept_multicast_ff00,     "ff00::1")
+V6_ACCEPT_TEST(v6_lenient_accept_multicast_ff02,     "ff02::1")
+V6_ACCEPT_TEST(v6_lenient_accept_link_local_fe80,    "fe80::1")
+V6_ACCEPT_TEST(v6_lenient_accept_link_local_long,    "fe80::abcd:ef01:2345:6789")
+
+#define V6_PARSE_REJECT_TEST(name, str) \
+    START_TEST(name) { \
+        struct nfs_ip_list *l = fresh_list(); \
+        int rc = enfs_parse_ip_single(l, NULL, str, REMOTEADDR); \
+        ck_assert_int_ne(rc, 0); \
+        free(l); \
+    } END_TEST
+
+V6_PARSE_REJECT_TEST(v6_reject_str_garbage,          "not-an-address::wat")
+V6_PARSE_REJECT_TEST(v6_reject_str_too_many_colons,  "1:2:3:4:5:6:7:8:9")
+V6_PARSE_REJECT_TEST(v6_reject_str_letters_in_hex,   "abcg::1")
+V6_PARSE_REJECT_TEST(v6_reject_str_double_doublecol, "::1::2")
+
+#define V6_PARSE_ACCEPT_TEST(name, str) \
+    START_TEST(name) { \
+        struct nfs_ip_list *l = fresh_list(); \
+        int rc = enfs_parse_ip_single(l, NULL, str, REMOTEADDR); \
+        ck_assert_int_eq(rc, 0); \
+        ck_assert_int_eq(l->count, 1); \
+        ck_assert_int_eq(l->address[0].ss_family, AF_INET6); \
+        free(l); \
+    } END_TEST
+
+V6_PARSE_ACCEPT_TEST(v6_parse_2001_db8_1,       "2001:db8::1")
+V6_PARSE_ACCEPT_TEST(v6_parse_2001_db8_2_18,    "2001:db8:2::18")
+V6_PARSE_ACCEPT_TEST(v6_parse_full_form,        "2001:0db8:0002:0000:0000:0000:0000:0011")
+V6_PARSE_ACCEPT_TEST(v6_parse_fc07_2_4_1,       "fc07:2::4:1")
+V6_PARSE_ACCEPT_TEST(v6_parse_compact_form,     "::ffff:1")
+
+/* IPv6 list-count tests. */
+START_TEST(v6_list_count_2) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "2001:db8::1~2001:db8::2";
+    ck_assert_int_eq(nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR), 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 2);
+} END_TEST
+START_TEST(v6_list_count_4) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "2001:db8::1~2001:db8::2~2001:db8::3~2001:db8::4";
+    ck_assert_int_eq(nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR), 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 4);
+} END_TEST
+START_TEST(v6_list_count_16) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "fc07::1~fc07::2~fc07::3~fc07::4~fc07::5~fc07::6~"
+                   "fc07::7~fc07::8~fc07::9~fc07::a~fc07::b~fc07::c~"
+                   "fc07::d~fc07::e~fc07::f~fc07::10";
+    ck_assert_int_eq(nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR), 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 16);
+} END_TEST
+
+/* ================================================================ */
+/* Generic family-dispatch (check_ip_valid).                        */
+/* ================================================================ */
+
+START_TEST(generic_check_v4_valid) {
+    struct sockaddr_storage ss = { 0 };
+    struct sockaddr_in *a = (void *)&ss;
+    *a = v4_addr("192.0.2.10");
+    ck_assert_int_eq(nfs_multipath_parse_options_check_ip_valid(&ss), 0);
+} END_TEST
+START_TEST(generic_check_v6_valid) {
+    struct sockaddr_storage ss = { 0 };
+    struct sockaddr_in6 *a = (void *)&ss;
+    *a = v6_addr("2001:db8::1");
+    ck_assert_int_eq(nfs_multipath_parse_options_check_ip_valid(&ss), 0);
+} END_TEST
+/* Documents lenient acceptance of v4 loopback at the dispatch layer
+ * — the same leniency as the v4-specific validator (file an issue
+ * to harden it). */
+START_TEST(generic_check_v4_loopback_lenient_accept) {
+    struct sockaddr_storage ss = { 0 };
+    struct sockaddr_in *a = (void *)&ss;
+    *a = v4_addr("127.0.0.1");
+    ck_assert_int_eq(nfs_multipath_parse_options_check_ip_valid(&ss), 0);
+} END_TEST
+START_TEST(generic_check_v6_unspecified_rejected) {
+    struct sockaddr_storage ss = { 0 };
+    struct sockaddr_in6 *a = (void *)&ss;
+    *a = v6_addr("::");
+    ck_assert_int_ne(nfs_multipath_parse_options_check_ip_valid(&ss), 0);
+} END_TEST
+START_TEST(generic_check_unsupported_family_rejected) {
+    struct sockaddr_storage ss = { 0 };
+    ss.ss_family = AF_UNIX;
+    ck_assert_int_ne(nfs_multipath_parse_options_check_ip_valid(&ss), 0);
+} END_TEST
+
+/* ================================================================ */
+/* Cross-list duplicate matrix at varying sizes.                    */
+/* ================================================================ */
+
+START_TEST(cross_list_v4_local_in_remote_first_pos) {
+    struct multipath_mount_options *o = fresh_options();
+    struct sockaddr_in a = v4_addr("10.0.0.1");
+    struct sockaddr_in b = v4_addr("10.0.0.2");
+    memcpy(&o->local_ip_list->address[0],  &a, sizeof(a));
+    o->local_ip_list->count = 1;
+    memcpy(&o->remote_ip_list->address[0], &a, sizeof(a)); /* dup at 0 */
+    memcpy(&o->remote_ip_list->address[1], &b, sizeof(b));
+    o->remote_ip_list->count = 2;
+    ck_assert_int_ne(nfs_multipath_parse_options_check_duplicate(o), 0);
+} END_TEST
+
+START_TEST(cross_list_v4_local_in_remote_last_pos) {
+    struct multipath_mount_options *o = fresh_options();
+    struct sockaddr_in a = v4_addr("10.0.0.1");
+    struct sockaddr_in b = v4_addr("10.0.0.2");
+    struct sockaddr_in c = v4_addr("10.0.0.3");
+    memcpy(&o->local_ip_list->address[0],  &c, sizeof(c));
+    o->local_ip_list->count = 1;
+    memcpy(&o->remote_ip_list->address[0], &a, sizeof(a));
+    memcpy(&o->remote_ip_list->address[1], &b, sizeof(b));
+    memcpy(&o->remote_ip_list->address[2], &c, sizeof(c)); /* dup at end */
+    o->remote_ip_list->count = 3;
+    ck_assert_int_ne(nfs_multipath_parse_options_check_duplicate(o), 0);
+} END_TEST
+
+START_TEST(cross_list_v4_two_locals_one_in_remote) {
+    struct multipath_mount_options *o = fresh_options();
+    struct sockaddr_in a = v4_addr("10.0.0.1");
+    struct sockaddr_in b = v4_addr("10.0.0.2");
+    struct sockaddr_in c = v4_addr("10.0.0.3");
+    memcpy(&o->local_ip_list->address[0],  &a, sizeof(a));
+    memcpy(&o->local_ip_list->address[1],  &b, sizeof(b));
+    o->local_ip_list->count = 2;
+    memcpy(&o->remote_ip_list->address[0], &c, sizeof(c));
+    memcpy(&o->remote_ip_list->address[1], &b, sizeof(b)); /* dup of local b */
+    o->remote_ip_list->count = 2;
+    ck_assert_int_ne(nfs_multipath_parse_options_check_duplicate(o), 0);
+} END_TEST
+
+START_TEST(cross_list_v6_local_in_remote_first_pos) {
+    struct multipath_mount_options *o = fresh_options();
+    struct sockaddr_in6 a = v6_addr("fc07::1");
+    struct sockaddr_in6 b = v6_addr("fc07::2");
+    memcpy(&o->local_ip_list->address[0],  &a, sizeof(a));
+    o->local_ip_list->count = 1;
+    memcpy(&o->remote_ip_list->address[0], &a, sizeof(a)); /* dup */
+    memcpy(&o->remote_ip_list->address[1], &b, sizeof(b));
+    o->remote_ip_list->count = 2;
+    ck_assert_int_ne(nfs_multipath_parse_options_check_duplicate(o), 0);
+} END_TEST
+
+START_TEST(cross_list_v6_no_duplicate_8x2) {
+    struct multipath_mount_options *o = fresh_options();
+    const char *locals[]  = {"fc07:0:0:1::1", "fc07:0:0:1::2"};
+    const char *remotes[] = {"fc07:1::1", "fc07:1::2", "fc07:1::3", "fc07:1::4",
+                             "fc07:1::5", "fc07:1::6", "fc07:1::7", "fc07:1::8"};
+    for (int i = 0; i < 2; i++) {
+        struct sockaddr_in6 a = v6_addr(locals[i]);
+        memcpy(&o->local_ip_list->address[i], &a, sizeof(a));
+    }
+    o->local_ip_list->count = 2;
+    for (int i = 0; i < 8; i++) {
+        struct sockaddr_in6 a = v6_addr(remotes[i]);
+        memcpy(&o->remote_ip_list->address[i], &a, sizeof(a));
+    }
+    o->remote_ip_list->count = 8;
+    ck_assert_int_eq(nfs_multipath_parse_options_check_duplicate(o), 0);
+} END_TEST
+
+START_TEST(cross_list_empty_local_no_dup) {
+    struct multipath_mount_options *o = fresh_options();
+    struct sockaddr_in b = v4_addr("10.0.0.2");
+    o->local_ip_list->count = 0;
+    memcpy(&o->remote_ip_list->address[0], &b, sizeof(b));
+    o->remote_ip_list->count = 1;
+    ck_assert_int_eq(nfs_multipath_parse_options_check_duplicate(o), 0);
+} END_TEST
+
+START_TEST(cross_list_empty_remote_no_dup) {
+    struct multipath_mount_options *o = fresh_options();
+    struct sockaddr_in a = v4_addr("10.0.0.1");
+    memcpy(&o->local_ip_list->address[0],  &a, sizeof(a));
+    o->local_ip_list->count = 1;
+    o->remote_ip_list->count = 0;
+    ck_assert_int_eq(nfs_multipath_parse_options_check_duplicate(o), 0);
+} END_TEST
+
 /* ---------------------------------------------------------------- */
 /* Suite.                                                           */
 /* ---------------------------------------------------------------- */
@@ -282,6 +626,54 @@ static Suite *parse_suite(void)
     tcase_add_test(tc4, v4_check_ipv4_valid_rejects_broadcast);
     suite_add_tcase(s, tc4);
 
+    /* IPv4 validity battery. */
+    TCase *tc4v = tcase_create("ipv4_validity");
+    tcase_add_test(tc4v, v4_accept_192_0_2_10);
+    tcase_add_test(tc4v, v4_accept_192_0_2_1);
+    tcase_add_test(tc4v, v4_accept_192_0_2_254);
+    tcase_add_test(tc4v, v4_accept_198_51_100_5);
+    tcase_add_test(tc4v, v4_accept_203_0_113_99);
+    tcase_add_test(tc4v, v4_accept_10_0_0_1);
+    tcase_add_test(tc4v, v4_accept_172_16_0_1);
+    tcase_add_test(tc4v, v4_accept_192_168_1_1);
+    tcase_add_test(tc4v, v4_accept_8_8_8_8);
+    tcase_add_test(tc4v, v4_accept_1_1_1_1);
+    tcase_add_test(tc4v, v4_reject_0_0_0_0);
+    tcase_add_test(tc4v, v4_reject_255_255_255_255);
+    tcase_add_test(tc4v, v4_lenient_accept_127_0_0_1);
+    tcase_add_test(tc4v, v4_lenient_accept_127_5_5_5);
+    tcase_add_test(tc4v, v4_lenient_accept_127_255_255_254);
+    tcase_add_test(tc4v, v4_lenient_accept_224_0_0_1);
+    tcase_add_test(tc4v, v4_lenient_accept_224_5_6_7);
+    tcase_add_test(tc4v, v4_lenient_accept_239_255_255_255);
+    tcase_add_test(tc4v, v4_lenient_accept_169_254_0_1);
+    tcase_add_test(tc4v, v4_lenient_accept_169_254_99_99);
+    suite_add_tcase(s, tc4v);
+
+    /* IPv4 parse battery. */
+    TCase *tc4p = tcase_create("ipv4_parse");
+    tcase_add_test(tc4p, v4_reject_str_empty);
+    tcase_add_test(tc4p, v4_reject_str_999_dot_999);
+    tcase_add_test(tc4p, v4_reject_str_only_dots);
+    tcase_add_test(tc4p, v4_reject_str_letters);
+    tcase_add_test(tc4p, v4_reject_str_too_many_octets);
+    tcase_add_test(tc4p, v4_reject_str_too_few_octets);
+    tcase_add_test(tc4p, v4_reject_str_negative_octet);
+    tcase_add_test(tc4p, v4_reject_str_huge_octet);
+    tcase_add_test(tc4p, v4_reject_str_trailing_dot);
+    tcase_add_test(tc4p, v4_reject_str_leading_dot);
+    tcase_add_test(tc4p, v4_parse_192_0_2_10);
+    tcase_add_test(tc4p, v4_parse_198_51_100_99);
+    tcase_add_test(tc4p, v4_parse_10_20_30_40);
+    tcase_add_test(tc4p, v4_parse_192_168_1_1);
+    tcase_add_test(tc4p, v4_parse_172_16_5_5);
+    tcase_add_test(tc4p, v4_list_count_2);
+    tcase_add_test(tc4p, v4_list_count_4);
+    tcase_add_test(tc4p, v4_list_count_8);
+    tcase_add_test(tc4p, v4_list_count_16);
+    tcase_add_test(tc4p, v4_list_one_invalid_aborts);
+    suite_add_tcase(s, tc4p);
+
     TCase *tc6 = tcase_create("ipv6");
     tcase_add_test(tc6, v6_parse_single_addr);
     tcase_add_test(tc6, v6_parse_eight_addrs_via_list);
@@ -291,10 +683,62 @@ static Suite *parse_suite(void)
     tcase_add_test(tc6, v6_check_ipv6_valid_rejects_unspecified);
     suite_add_tcase(s, tc6);
 
+    /* IPv6 validity battery. */
+    TCase *tc6v = tcase_create("ipv6_validity");
+    tcase_add_test(tc6v, v6_accept_2001_db8_2_11);
+    tcase_add_test(tc6v, v6_accept_2001_db8_2_18);
+    tcase_add_test(tc6v, v6_accept_2001_db8_full_form);
+    tcase_add_test(tc6v, v6_accept_fc00_ula);
+    tcase_add_test(tc6v, v6_accept_fd00_ula);
+    tcase_add_test(tc6v, v6_accept_fc07_2_4_1);
+    tcase_add_test(tc6v, v6_accept_fc07_2_4_2);
+    tcase_add_test(tc6v, v6_accept_2620_routable);
+    tcase_add_test(tc6v, v6_accept_2400_routable);
+    tcase_add_test(tc6v, v6_reject_unspecified_colon_colon);
+    tcase_add_test(tc6v, v6_lenient_accept_loopback);
+    tcase_add_test(tc6v, v6_lenient_accept_multicast_ff00);
+    tcase_add_test(tc6v, v6_lenient_accept_multicast_ff02);
+    tcase_add_test(tc6v, v6_lenient_accept_link_local_fe80);
+    tcase_add_test(tc6v, v6_lenient_accept_link_local_long);
+    suite_add_tcase(s, tc6v);
+
+    /* IPv6 parse battery. */
+    TCase *tc6p = tcase_create("ipv6_parse");
+    tcase_add_test(tc6p, v6_reject_str_garbage);
+    tcase_add_test(tc6p, v6_reject_str_too_many_colons);
+    tcase_add_test(tc6p, v6_reject_str_letters_in_hex);
+    tcase_add_test(tc6p, v6_reject_str_double_doublecol);
+    tcase_add_test(tc6p, v6_parse_2001_db8_1);
+    tcase_add_test(tc6p, v6_parse_2001_db8_2_18);
+    tcase_add_test(tc6p, v6_parse_full_form);
+    tcase_add_test(tc6p, v6_parse_fc07_2_4_1);
+    tcase_add_test(tc6p, v6_parse_compact_form);
+    tcase_add_test(tc6p, v6_list_count_2);
+    tcase_add_test(tc6p, v6_list_count_4);
+    tcase_add_test(tc6p, v6_list_count_16);
+    suite_add_tcase(s, tc6p);
+
+    /* Generic family-dispatch. */
+    TCase *tcg = tcase_create("generic_check_dispatch");
+    tcase_add_test(tcg, generic_check_v4_valid);
+    tcase_add_test(tcg, generic_check_v6_valid);
+    tcase_add_test(tcg, generic_check_v4_loopback_lenient_accept);
+    tcase_add_test(tcg, generic_check_v6_unspecified_rejected);
+    tcase_add_test(tcg, generic_check_unsupported_family_rejected);
+    suite_add_tcase(s, tcg);
+
     TCase *tcmix = tcase_create("cross_list");
     tcase_add_test(tcmix, cross_list_duplicate_v4_detected);
     tcase_add_test(tcmix, cross_list_no_duplicate_v4_accepted);
     tcase_add_test(tcmix, cross_list_duplicate_v6_detected);
+    /* Extended duplicate matrix. */
+    tcase_add_test(tcmix, cross_list_v4_local_in_remote_first_pos);
+    tcase_add_test(tcmix, cross_list_v4_local_in_remote_last_pos);
+    tcase_add_test(tcmix, cross_list_v4_two_locals_one_in_remote);
+    tcase_add_test(tcmix, cross_list_v6_local_in_remote_first_pos);
+    tcase_add_test(tcmix, cross_list_v6_no_duplicate_8x2);
+    tcase_add_test(tcmix, cross_list_empty_local_no_dup);
+    tcase_add_test(tcmix, cross_list_empty_remote_no_dup);
     suite_add_tcase(s, tcmix);
 
     return s;
