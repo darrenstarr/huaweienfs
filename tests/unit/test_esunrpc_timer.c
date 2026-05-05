@@ -265,6 +265,111 @@ START_TEST(e2e_rising_rtt_grows_rto) {
 } END_TEST
 
 /* ============================================================ */
+/* Parameterised init_rtt: exercise many timeo values            */
+/* ============================================================ */
+
+#define INIT_TIMEO_TEST(name, tv) \
+    START_TEST(name) { \
+        struct rpc_rtt rt; \
+        esunrpc_rpc_init_rtt(&rt, (tv)); \
+        ck_assert_uint_eq(rt.timeo, (tv)); \
+        unsigned long expected_init = \
+            ((tv) > RPC_RTO_INIT) ? (((tv) - RPC_RTO_INIT) << 3) : 0; \
+        for (int i = 0; i < 5; i++) { \
+            ck_assert_uint_eq(rt.srtt[i], expected_init); \
+            ck_assert_uint_eq(rt.sdrtt[i], RPC_RTO_INIT); \
+            ck_assert_int_eq(rt.ntimeouts[i], 0); \
+        } \
+    } END_TEST
+
+INIT_TIMEO_TEST(init_timeo_50,    50)
+INIT_TIMEO_TEST(init_timeo_100,   100)
+INIT_TIMEO_TEST(init_timeo_150,   150)
+INIT_TIMEO_TEST(init_timeo_200,   200)
+INIT_TIMEO_TEST(init_timeo_300,   300)
+INIT_TIMEO_TEST(init_timeo_500,   500)
+INIT_TIMEO_TEST(init_timeo_750,   750)
+INIT_TIMEO_TEST(init_timeo_1500,  1500)
+INIT_TIMEO_TEST(init_timeo_3000,  3000)
+INIT_TIMEO_TEST(init_timeo_6000,  6000)
+INIT_TIMEO_TEST(init_timeo_15000, 15000)
+INIT_TIMEO_TEST(init_timeo_30000, 30000)
+INIT_TIMEO_TEST(init_timeo_60000, 60000)
+
+/* ============================================================ */
+/* Parameterised RTT update: many sample values                 */
+/* ============================================================ */
+
+#define UPDATE_VALUE_TEST(name, value) \
+    START_TEST(name) { \
+        struct rpc_rtt rt; \
+        esunrpc_rpc_init_rtt(&rt, RPC_RTO_INIT); \
+        unsigned long ref_s = 0, ref_d = RPC_RTO_INIT; \
+        update_simulate(&ref_s, &ref_d, value); \
+        esunrpc_rpc_update_rtt(&rt, 1, value); \
+        ck_assert_uint_eq(rt.srtt[0], ref_s); \
+        ck_assert_uint_eq(rt.sdrtt[0], ref_d); \
+    } END_TEST
+
+UPDATE_VALUE_TEST(update_v_1,    1)
+UPDATE_VALUE_TEST(update_v_2,    2)
+UPDATE_VALUE_TEST(update_v_5,    5)
+UPDATE_VALUE_TEST(update_v_10,   10)
+UPDATE_VALUE_TEST(update_v_25,   25)
+UPDATE_VALUE_TEST(update_v_50,   50)
+UPDATE_VALUE_TEST(update_v_75,   75)
+UPDATE_VALUE_TEST(update_v_100,  100)
+UPDATE_VALUE_TEST(update_v_150,  150)
+UPDATE_VALUE_TEST(update_v_200,  200)
+UPDATE_VALUE_TEST(update_v_500,  500)
+UPDATE_VALUE_TEST(update_v_1000, 1000)
+UPDATE_VALUE_TEST(update_v_5000, 5000)
+UPDATE_VALUE_TEST(update_v_10000,10000)
+UPDATE_VALUE_TEST(update_v_50000,50000)
+
+/* ============================================================ */
+/* update_rtt: per-slot independence — updating one slot must    */
+/* not affect any other slot.                                   */
+/* ============================================================ */
+
+#define UPDATE_SLOT_INDEP_TEST(name, slot) \
+    START_TEST(name) { \
+        struct rpc_rtt rt; \
+        esunrpc_rpc_init_rtt(&rt, RPC_RTO_INIT); \
+        esunrpc_rpc_update_rtt(&rt, slot, 500); \
+        for (int i = 0; i < 5; i++) { \
+            if (i == slot - 1) continue; \
+            ck_assert_uint_eq(rt.srtt[i], 0); \
+            ck_assert_uint_eq(rt.sdrtt[i], RPC_RTO_INIT); \
+        } \
+    } END_TEST
+
+UPDATE_SLOT_INDEP_TEST(update_slot_indep_1, 1)
+UPDATE_SLOT_INDEP_TEST(update_slot_indep_2, 2)
+UPDATE_SLOT_INDEP_TEST(update_slot_indep_3, 3)
+UPDATE_SLOT_INDEP_TEST(update_slot_indep_4, 4)
+UPDATE_SLOT_INDEP_TEST(update_slot_indep_5, 5)
+
+/* ============================================================ */
+/* calc_rto for many timeo values when timer==0.                */
+/* ============================================================ */
+
+#define CALC_RTO_TIMEO_TEST(name, tv) \
+    START_TEST(name) { \
+        struct rpc_rtt rt; \
+        esunrpc_rpc_init_rtt(&rt, (tv)); \
+        ck_assert_uint_eq(esunrpc_rpc_calc_rto(&rt, 0), (tv)); \
+    } END_TEST
+
+CALC_RTO_TIMEO_TEST(calc_rto_t0_50,    50)
+CALC_RTO_TIMEO_TEST(calc_rto_t0_100,   100)
+CALC_RTO_TIMEO_TEST(calc_rto_t0_500,   500)
+CALC_RTO_TIMEO_TEST(calc_rto_t0_1000,  1000)
+CALC_RTO_TIMEO_TEST(calc_rto_t0_5000,  5000)
+CALC_RTO_TIMEO_TEST(calc_rto_t0_30000, 30000)
+CALC_RTO_TIMEO_TEST(calc_rto_t0_60000, 60000)
+
+/* ============================================================ */
 /* Suite plumbing.                                              */
 /* ============================================================ */
 
@@ -307,6 +412,62 @@ static Suite *esunrpc_timer_suite(void)
     tcase_add_test(tce, e2e_steady_rtt_converges_to_predictable_rto);
     tcase_add_test(tce, e2e_rising_rtt_grows_rto);
     suite_add_tcase(s, tce);
+
+    /* Parameterised init_rtt at many timeo values. */
+    TCase *tcit = tcase_create("init_timeo_param");
+    tcase_add_test(tcit, init_timeo_50);
+    tcase_add_test(tcit, init_timeo_100);
+    tcase_add_test(tcit, init_timeo_150);
+    tcase_add_test(tcit, init_timeo_200);
+    tcase_add_test(tcit, init_timeo_300);
+    tcase_add_test(tcit, init_timeo_500);
+    tcase_add_test(tcit, init_timeo_750);
+    tcase_add_test(tcit, init_timeo_1500);
+    tcase_add_test(tcit, init_timeo_3000);
+    tcase_add_test(tcit, init_timeo_6000);
+    tcase_add_test(tcit, init_timeo_15000);
+    tcase_add_test(tcit, init_timeo_30000);
+    tcase_add_test(tcit, init_timeo_60000);
+    suite_add_tcase(s, tcit);
+
+    /* Parameterised single-update arithmetic at many m values. */
+    TCase *tcuv = tcase_create("update_value_param");
+    tcase_add_test(tcuv, update_v_1);
+    tcase_add_test(tcuv, update_v_2);
+    tcase_add_test(tcuv, update_v_5);
+    tcase_add_test(tcuv, update_v_10);
+    tcase_add_test(tcuv, update_v_25);
+    tcase_add_test(tcuv, update_v_50);
+    tcase_add_test(tcuv, update_v_75);
+    tcase_add_test(tcuv, update_v_100);
+    tcase_add_test(tcuv, update_v_150);
+    tcase_add_test(tcuv, update_v_200);
+    tcase_add_test(tcuv, update_v_500);
+    tcase_add_test(tcuv, update_v_1000);
+    tcase_add_test(tcuv, update_v_5000);
+    tcase_add_test(tcuv, update_v_10000);
+    tcase_add_test(tcuv, update_v_50000);
+    suite_add_tcase(s, tcuv);
+
+    /* Per-slot update independence. */
+    TCase *tcsi = tcase_create("update_slot_indep");
+    tcase_add_test(tcsi, update_slot_indep_1);
+    tcase_add_test(tcsi, update_slot_indep_2);
+    tcase_add_test(tcsi, update_slot_indep_3);
+    tcase_add_test(tcsi, update_slot_indep_4);
+    tcase_add_test(tcsi, update_slot_indep_5);
+    suite_add_tcase(s, tcsi);
+
+    /* calc_rto returns timeo on timer==0 — many timeo values. */
+    TCase *tcrt = tcase_create("calc_rto_timeo_param");
+    tcase_add_test(tcrt, calc_rto_t0_50);
+    tcase_add_test(tcrt, calc_rto_t0_100);
+    tcase_add_test(tcrt, calc_rto_t0_500);
+    tcase_add_test(tcrt, calc_rto_t0_1000);
+    tcase_add_test(tcrt, calc_rto_t0_5000);
+    tcase_add_test(tcrt, calc_rto_t0_30000);
+    tcase_add_test(tcrt, calc_rto_t0_60000);
+    suite_add_tcase(s, tcrt);
 
     return s;
 }
