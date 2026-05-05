@@ -370,6 +370,125 @@ CALC_RTO_TIMEO_TEST(calc_rto_t0_30000, 30000)
 CALC_RTO_TIMEO_TEST(calc_rto_t0_60000, 60000)
 
 /* ============================================================ */
+/* Convergence tests: feed N samples of m_jiffies, verify the   */
+/* SRTT estimator converges towards the input. Van Jacobson's   */
+/* SRTT_new = (7*SRTT_old + m) / 8. After enough samples the    */
+/* estimator should track the true RTT.                          */
+/* ============================================================ */
+
+#define CONVERGE_TEST(name, m_val, samples, max_err) \
+    START_TEST(name) { \
+        struct rpc_rtt rt; \
+        esunrpc_rpc_init_rtt(&rt, RPC_RTO_INIT); \
+        for (int i = 0; i < (samples); i++) \
+            esunrpc_rpc_update_rtt(&rt, 1, (m_val)); \
+        /* SRTT is in 8x units (smoothed). */ \
+        unsigned long actual = rt.srtt[0] >> 3; \
+        unsigned long want   = (m_val); \
+        unsigned long diff   = actual > want ? actual - want : want - actual; \
+        ck_assert_uint_le(diff, (max_err)); \
+    } END_TEST
+
+CONVERGE_TEST(converge_to_10,    10,   100,  3)
+CONVERGE_TEST(converge_to_20,    20,   100,  3)
+CONVERGE_TEST(converge_to_50,    50,   100,  3)
+CONVERGE_TEST(converge_to_100,   100,  100,  3)
+CONVERGE_TEST(converge_to_500,   500,  100,  3)
+CONVERGE_TEST(converge_to_1000,  1000, 100,  3)
+CONVERGE_TEST(converge_to_50_long,    50,    500,  1)
+CONVERGE_TEST(converge_to_100_long,   100,   500,  1)
+CONVERGE_TEST(converge_to_500_long,   500,   500,  1)
+CONVERGE_TEST(converge_to_1000_long, 1000,   500,  1)
+CONVERGE_TEST(converge_to_2000_long, 2000,   500,  1)
+
+/* ============================================================ */
+/* calc_rto produces the same value as the RFC 6298 formula:    */
+/* RTO = (SRTT >> 3) + SDRTT                                    */
+/* ============================================================ */
+
+START_TEST(calc_rto_formula_matches) {
+    struct rpc_rtt rt;
+    esunrpc_rpc_init_rtt(&rt, RPC_RTO_INIT);
+    /* Feed a single sample to get non-zero SRTT/SDRTT. */
+    esunrpc_rpc_update_rtt(&rt, 1, 100);
+    unsigned long expected = ((rt.srtt[0] + 7) >> 3) + rt.sdrtt[0];
+    if (expected > RPC_RTO_MAX) expected = RPC_RTO_MAX;
+    ck_assert_uint_eq(esunrpc_rpc_calc_rto(&rt, 1), expected);
+} END_TEST
+
+/* ============================================================ */
+/* Stability under noisy samples: alternating fast/slow RTTs.   */
+/* The estimator should stay between the two extremes.          */
+/* ============================================================ */
+
+START_TEST(estimator_stays_between_extremes) {
+    struct rpc_rtt rt;
+    esunrpc_rpc_init_rtt(&rt, RPC_RTO_INIT);
+    for (int i = 0; i < 200; i++) {
+        long m = (i & 1) ? 50 : 500;
+        esunrpc_rpc_update_rtt(&rt, 1, m);
+    }
+    unsigned long srtt = rt.srtt[0] >> 3;
+    ck_assert_uint_ge(srtt, 50);
+    ck_assert_uint_le(srtt, 500);
+} END_TEST
+
+START_TEST(estimator_recovers_from_outlier) {
+    struct rpc_rtt rt;
+    esunrpc_rpc_init_rtt(&rt, RPC_RTO_INIT);
+    /* Steady at 100 for 100 samples. */
+    for (int i = 0; i < 100; i++) esunrpc_rpc_update_rtt(&rt, 1, 100);
+    /* One huge outlier. */
+    esunrpc_rpc_update_rtt(&rt, 1, 10000);
+    /* Recovery: 100 more steady samples. SRTT should pull back near 100. */
+    for (int i = 0; i < 100; i++) esunrpc_rpc_update_rtt(&rt, 1, 100);
+    unsigned long srtt = rt.srtt[0] >> 3;
+    ck_assert_uint_ge(srtt, 95);
+    ck_assert_uint_le(srtt, 110);
+} END_TEST
+
+/* ============================================================ */
+/* SDRTT lower bound at RPC_RTO_MIN.                            */
+/* ============================================================ */
+
+START_TEST(sdrtt_clamped_to_minimum_after_steady_input) {
+    struct rpc_rtt rt;
+    esunrpc_rpc_init_rtt(&rt, RPC_RTO_INIT);
+    /* 1000 identical samples → mean-deviation should approach 0,
+     * but the SUT clamps it to RPC_RTO_MIN. */
+    for (int i = 0; i < 1000; i++) esunrpc_rpc_update_rtt(&rt, 1, 50);
+    ck_assert_uint_ge(rt.sdrtt[0], RPC_RTO_MIN);
+} END_TEST
+
+/* ============================================================ */
+/* Multi-slot independence: feeding different RTTs to different */
+/* slots leaves them all consistent.                            */
+/* ============================================================ */
+
+START_TEST(multi_slot_carries_per_slot_history) {
+    struct rpc_rtt rt;
+    esunrpc_rpc_init_rtt(&rt, RPC_RTO_INIT);
+    for (int i = 0; i < 100; i++) {
+        esunrpc_rpc_update_rtt(&rt, 1, 50);
+        esunrpc_rpc_update_rtt(&rt, 2, 200);
+        esunrpc_rpc_update_rtt(&rt, 3, 1000);
+        esunrpc_rpc_update_rtt(&rt, 4, 2000);
+        esunrpc_rpc_update_rtt(&rt, 5, 5000);
+    }
+    unsigned long s1 = rt.srtt[0] >> 3;
+    unsigned long s2 = rt.srtt[1] >> 3;
+    unsigned long s3 = rt.srtt[2] >> 3;
+    unsigned long s4 = rt.srtt[3] >> 3;
+    unsigned long s5 = rt.srtt[4] >> 3;
+    /* Each slot should be in its own neighbourhood. */
+    ck_assert_uint_le(s1, 100);
+    ck_assert_uint_ge(s2, 100); ck_assert_uint_le(s2, 300);
+    ck_assert_uint_ge(s3, 800); ck_assert_uint_le(s3, 1200);
+    ck_assert_uint_ge(s4, 1700); ck_assert_uint_le(s4, 2300);
+    ck_assert_uint_ge(s5, 4500); ck_assert_uint_le(s5, 5500);
+} END_TEST
+
+/* ============================================================ */
 /* Suite plumbing.                                              */
 /* ============================================================ */
 
@@ -468,6 +587,28 @@ static Suite *esunrpc_timer_suite(void)
     tcase_add_test(tcrt, calc_rto_t0_30000);
     tcase_add_test(tcrt, calc_rto_t0_60000);
     suite_add_tcase(s, tcrt);
+
+    TCase *tcconv = tcase_create("convergence");
+    tcase_add_test(tcconv, converge_to_10);
+    tcase_add_test(tcconv, converge_to_20);
+    tcase_add_test(tcconv, converge_to_50);
+    tcase_add_test(tcconv, converge_to_100);
+    tcase_add_test(tcconv, converge_to_500);
+    tcase_add_test(tcconv, converge_to_1000);
+    tcase_add_test(tcconv, converge_to_50_long);
+    tcase_add_test(tcconv, converge_to_100_long);
+    tcase_add_test(tcconv, converge_to_500_long);
+    tcase_add_test(tcconv, converge_to_1000_long);
+    tcase_add_test(tcconv, converge_to_2000_long);
+    suite_add_tcase(s, tcconv);
+
+    TCase *tcmisc = tcase_create("misc");
+    tcase_add_test(tcmisc, calc_rto_formula_matches);
+    tcase_add_test(tcmisc, estimator_stays_between_extremes);
+    tcase_add_test(tcmisc, estimator_recovers_from_outlier);
+    tcase_add_test(tcmisc, sdrtt_clamped_to_minimum_after_steady_input);
+    tcase_add_test(tcmisc, multi_slot_carries_per_slot_history);
+    suite_add_tcase(s, tcmisc);
 
     return s;
 }
