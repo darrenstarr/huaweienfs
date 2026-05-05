@@ -494,6 +494,110 @@ UADDR_ROUNDTRIP_V6(uaddr_rt_v6_addr_d, "2620:0:1::1",2049)
 UADDR_ROUNDTRIP_V6(uaddr_rt_v6_addr_e, "2400::abcd", 2049)
 UADDR_ROUNDTRIP_V6(uaddr_rt_v6_addr_f, "2620::ffff", 2049)
 
+/* Wide port matrix at fixed addresses. NFS server (2049),
+ * portmapper (111), and unprivileged ports throughout the range. */
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_a, "1.1.1.1", 21)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_b, "1.1.1.1", 22)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_c, "1.1.1.1", 23)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_d, "1.1.1.1", 25)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_e, "1.1.1.1", 53)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_f, "1.1.1.1", 80)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_g, "1.1.1.1", 111)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_h, "1.1.1.1", 123)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_i, "1.1.1.1", 161)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_j, "1.1.1.1", 443)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_k, "1.1.1.1", 445)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_l, "1.1.1.1", 514)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_m, "1.1.1.1", 873)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_n, "1.1.1.1", 993)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_o, "1.1.1.1", 2049)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_p, "1.1.1.1", 5060)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_q, "1.1.1.1", 8000)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_r, "1.1.1.1", 8443)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_s, "1.1.1.1", 9000)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_t, "1.1.1.1", 16384)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_u, "1.1.1.1", 32768)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_v, "1.1.1.1", 49152)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_w, "1.1.1.1", 60000)
+UADDR_ROUNDTRIP_V4(uaddr_rt_v4_port_matrix_x, "1.1.1.1", 65000)
+
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_port_matrix_a, "fe80::1", 22)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_port_matrix_b, "fe80::1", 80)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_port_matrix_c, "fe80::1", 111)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_port_matrix_d, "fe80::1", 443)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_port_matrix_e, "fe80::1", 2049)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_port_matrix_f, "fe80::1", 5060)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_port_matrix_g, "fe80::1", 8443)
+UADDR_ROUNDTRIP_V6(uaddr_rt_v6_port_matrix_h, "fe80::1", 65535)
+
+/* Additional v4 / v6 round-trip rejection cases. */
+START_TEST(uaddr2sock_empty_string_returns_zero) {
+    struct sockaddr_storage ss = {0};
+    ck_assert_uint_eq(
+        esunrpc_rpc_uaddr2sockaddr(NULL, "", 0,
+                                   (struct sockaddr *)&ss, sizeof(ss)),
+        0);
+} END_TEST
+
+START_TEST(uaddr2sock_only_dots_returns_zero) {
+    struct sockaddr_storage ss = {0};
+    const char *u = "....";
+    ck_assert_uint_eq(
+        esunrpc_rpc_uaddr2sockaddr(NULL, u, strlen(u),
+                                   (struct sockaddr *)&ss, sizeof(ss)),
+        0);
+} END_TEST
+
+START_TEST(uaddr2sock_port_lo_too_large_returns_zero) {
+    struct sockaddr_storage ss = {0};
+    /* Port-lo octet > 255 — kstrtou8 fails. */
+    const char *u = "192.0.2.10.0.999";
+    ck_assert_uint_eq(
+        esunrpc_rpc_uaddr2sockaddr(NULL, u, strlen(u),
+                                   (struct sockaddr *)&ss, sizeof(ss)),
+        0);
+} END_TEST
+
+START_TEST(uaddr2sock_port_hi_too_large_returns_zero) {
+    struct sockaddr_storage ss = {0};
+    /* Port-hi octet > 255 — kstrtou8 fails on the second-to-last
+     * octet. */
+    const char *u = "192.0.2.10.999.0";
+    ck_assert_uint_eq(
+        esunrpc_rpc_uaddr2sockaddr(NULL, u, strlen(u),
+                                   (struct sockaddr *)&ss, sizeof(ss)),
+        0);
+} END_TEST
+
+START_TEST(uaddr2sock_negative_port_returns_zero) {
+    struct sockaddr_storage ss = {0};
+    /* Negative number — kstrtou8 rejects sign. */
+    const char *u = "192.0.2.10.-1.0";
+    ck_assert_uint_eq(
+        esunrpc_rpc_uaddr2sockaddr(NULL, u, strlen(u),
+                                   (struct sockaddr *)&ss, sizeof(ss)),
+        0);
+} END_TEST
+
+START_TEST(uaddr2sock_letter_in_port_returns_zero) {
+    struct sockaddr_storage ss = {0};
+    const char *u = "192.0.2.10.x.y";
+    ck_assert_uint_eq(
+        esunrpc_rpc_uaddr2sockaddr(NULL, u, strlen(u),
+                                   (struct sockaddr *)&ss, sizeof(ss)),
+        0);
+} END_TEST
+
+START_TEST(uaddr2sock_invalid_addr_returns_zero) {
+    struct sockaddr_storage ss = {0};
+    /* Address octet > 255 — rpc_pton rejects. */
+    const char *u = "999.0.2.10.8.1";
+    ck_assert_uint_eq(
+        esunrpc_rpc_uaddr2sockaddr(NULL, u, strlen(u),
+                                   (struct sockaddr *)&ss, sizeof(ss)),
+        0);
+} END_TEST
+
 /* ============================================================ */
 /* Wide ntop battery — exhaustive class-shape coverage.          */
 /* ============================================================ */
@@ -762,6 +866,51 @@ static Suite *esunrpc_addr_suite(void)
     tcase_add_test(t12, pton_v6_extended_k);
     tcase_add_test(t12, pton_v6_extended_l);
     suite_add_tcase(s, t12);
+
+    TCase *t14 = tcase_create("uaddr_port_matrix");
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_a);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_b);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_c);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_d);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_e);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_f);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_g);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_h);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_i);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_j);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_k);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_l);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_m);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_n);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_o);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_p);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_q);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_r);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_s);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_t);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_u);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_v);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_w);
+    tcase_add_test(t14, uaddr_rt_v4_port_matrix_x);
+    tcase_add_test(t14, uaddr_rt_v6_port_matrix_a);
+    tcase_add_test(t14, uaddr_rt_v6_port_matrix_b);
+    tcase_add_test(t14, uaddr_rt_v6_port_matrix_c);
+    tcase_add_test(t14, uaddr_rt_v6_port_matrix_d);
+    tcase_add_test(t14, uaddr_rt_v6_port_matrix_e);
+    tcase_add_test(t14, uaddr_rt_v6_port_matrix_f);
+    tcase_add_test(t14, uaddr_rt_v6_port_matrix_g);
+    tcase_add_test(t14, uaddr_rt_v6_port_matrix_h);
+    suite_add_tcase(s, t14);
+
+    TCase *t15 = tcase_create("uaddr_rejects");
+    tcase_add_test(t15, uaddr2sock_empty_string_returns_zero);
+    tcase_add_test(t15, uaddr2sock_only_dots_returns_zero);
+    tcase_add_test(t15, uaddr2sock_port_lo_too_large_returns_zero);
+    tcase_add_test(t15, uaddr2sock_port_hi_too_large_returns_zero);
+    tcase_add_test(t15, uaddr2sock_negative_port_returns_zero);
+    tcase_add_test(t15, uaddr2sock_letter_in_port_returns_zero);
+    tcase_add_test(t15, uaddr2sock_invalid_addr_returns_zero);
+    suite_add_tcase(s, t15);
 
     return s;
 }
