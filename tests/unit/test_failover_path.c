@@ -370,6 +370,234 @@ V4_FLAGS_TEST(v4_top_getacl_sent,    NFSPROC4_CLNT_GETACL,   true,  SUT_FAILOVER
 V4_FLAGS_TEST(v4_top_delegreturn,    NFSPROC4_CLNT_DELEGRETURN, true, SUT_FAILOVER_RETRY)
 
 /* ============================================================ */
+/* failover_check_task — gatekeeper for the failover entry      */
+/* points. Returns 0 on "this task is eligible for failover     */
+/* handling", -EINVAL otherwise.                                */
+/* ============================================================ */
+
+int failover_check_task(struct rpc_task *task);
+bool failover_is_task_use_fixed_path(struct rpc_task *task);
+bool failover_task_need_call_start_again(struct rpc_task *task);
+bool failover_prepare_transmit(struct rpc_task *task);
+
+/* The stub for enfs_get_config_multipath_state lives in
+ * failover_path_stubs.c; default = 1 (enabled). The stub for
+ * pm_get_path_state returns NORMAL by default. */
+extern int32_t enfs_get_config_multipath_state(void);
+
+/* For tests that need to flip the multipath state on/off we re-stub
+ * via a dedicated weak symbol — the existing failover_path_stubs.c
+ * has a hardcoded `return 1;`. The helper macro below works around
+ * that by toggling task fields the SUT reads instead. So most
+ * "disabled multipath" coverage comes via failover_time_tests; here
+ * we focus on the other branches. */
+
+START_TEST(check_task_NULL_task_returns_EINVAL) {
+    /* unlikely(task == NULL) branch; SUT reads task->tk_client only
+     * AFTER the unlikely check. */
+    ck_assert_int_eq(failover_check_task(NULL), -EINVAL);
+} END_TEST
+
+START_TEST(check_task_NULL_clnt_returns_EINVAL) {
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    ck_assert_int_eq(failover_check_task(t), -EINVAL);
+} END_TEST
+
+START_TEST(check_task_wrong_program_returns_EINVAL) {
+    struct rpc_clnt *c = make_clnt(3);
+    c->cl_prog = 999999;  /* not NFS_PROGRAM */
+    c->cl_enfs = 1;
+    c->cl_parent = c;     /* self-parent = root */
+    struct rpc_task *t = make_task(c, NULL, 0, false);
+    ck_assert_int_eq(failover_check_task(t), -EINVAL);
+} END_TEST
+
+START_TEST(check_task_non_enfs_clnt_returns_EINVAL) {
+    struct rpc_clnt *c = make_clnt(3);
+    c->cl_prog = NFS_PROGRAM;
+    c->cl_enfs = 0;       /* not enfs-managed */
+    c->cl_parent = c;
+    struct rpc_task *t = make_task(c, NULL, 0, false);
+    ck_assert_int_eq(failover_check_task(t), -EINVAL);
+} END_TEST
+
+START_TEST(check_task_enfs_managed_returns_zero) {
+    struct rpc_clnt *c = make_clnt(3);
+    c->cl_prog = NFS_PROGRAM;
+    c->cl_enfs = 1;
+    c->cl_parent = c;
+    struct rpc_task *t = make_task(c, NULL, 0, false);
+    ck_assert_int_eq(failover_check_task(t), 0);
+} END_TEST
+
+START_TEST(check_task_v4_child_walks_to_enfs_parent_returns_zero) {
+    struct rpc_clnt *parent = make_clnt(4);
+    parent->cl_prog = NFS_PROGRAM;
+    parent->cl_enfs = 1;
+    parent->cl_parent = parent;
+    struct rpc_clnt *child = make_clnt(4);
+    child->cl_prog = NFS_PROGRAM;
+    child->cl_enfs = 0;       /* child says no */
+    child->cl_parent = parent;
+    struct rpc_task *t = make_task(child, NULL, 0, false);
+    /* Parent walk should pick up the parent's cl_enfs = 1. */
+    ck_assert_int_eq(failover_check_task(t), 0);
+} END_TEST
+
+/* ============================================================ */
+/* failover_is_task_use_fixed_path                              */
+/* ============================================================ */
+
+START_TEST(is_fixed_RPC_TASK_FIXED_set_returns_true) {
+    struct rpc_task *t = make_task(NULL, NULL, RPC_TASK_FIXED, false);
+    ck_assert(failover_is_task_use_fixed_path(t));
+} END_TEST
+
+START_TEST(is_fixed_no_FIXED_no_test_xprt_returns_false) {
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    ck_assert(!failover_is_task_use_fixed_path(t));
+} END_TEST
+
+/* RPC_TASK_FIXED + various other flags still triggers fixed-path. */
+START_TEST(is_fixed_FIXED_plus_other_flags_still_true) {
+    struct rpc_task *t = make_task(NULL, NULL,
+                                    RPC_TASK_FIXED | RPC_TASK_ASYNC | RPC_TASK_SOFT,
+                                    false);
+    ck_assert(failover_is_task_use_fixed_path(t));
+} END_TEST
+
+/* ============================================================ */
+/* failover_task_need_call_start_again — composes check_task    */
+/* with is_task_use_fixed_path.                                 */
+/* ============================================================ */
+
+START_TEST(start_again_check_fails_returns_false) {
+    /* Non-enfs clnt → check_task returns EINVAL → false. */
+    struct rpc_clnt *c = make_clnt(3);
+    c->cl_prog = NFS_PROGRAM;
+    c->cl_enfs = 0;
+    c->cl_parent = c;
+    struct rpc_task *t = make_task(c, NULL, 0, false);
+    ck_assert(!failover_task_need_call_start_again(t));
+} END_TEST
+
+START_TEST(start_again_fixed_returns_false) {
+    /* Eligible task BUT RPC_TASK_FIXED → false. */
+    struct rpc_clnt *c = make_clnt(3);
+    c->cl_prog = NFS_PROGRAM;
+    c->cl_enfs = 1;
+    c->cl_parent = c;
+    struct rpc_task *t = make_task(c, NULL, RPC_TASK_FIXED, false);
+    ck_assert(!failover_task_need_call_start_again(t));
+} END_TEST
+
+START_TEST(start_again_eligible_returns_true) {
+    struct rpc_clnt *c = make_clnt(3);
+    c->cl_prog = NFS_PROGRAM;
+    c->cl_enfs = 1;
+    c->cl_parent = c;
+    struct rpc_task *t = make_task(c, NULL, 0, false);
+    ck_assert(failover_task_need_call_start_again(t));
+} END_TEST
+
+START_TEST(start_again_NULL_task_returns_false) {
+    ck_assert(!failover_task_need_call_start_again(NULL));
+} END_TEST
+
+START_TEST(start_again_NULL_clnt_returns_false) {
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    ck_assert(!failover_task_need_call_start_again(t));
+} END_TEST
+
+/* ============================================================ */
+/* failover_prepare_transmit                                    */
+/* ============================================================ */
+/* The function delegates: for fixed-path tasks always returns
+ * true; otherwise checks pm_get_path_state == FAULT and rejects
+ * if so. The stub returns PM_STATE_NORMAL by default, so the
+ * second branch returns true unless we manipulate the xprt.
+ * Since our stub is hard-coded to NORMAL we can only test the
+ * fixed-path and no-FAULT paths here without deeper plumbing. */
+
+START_TEST(prepare_transmit_fixed_path_returns_true) {
+    struct rpc_task *t = make_task(NULL, NULL, RPC_TASK_FIXED, false);
+    ck_assert(failover_prepare_transmit(t));
+} END_TEST
+
+START_TEST(prepare_transmit_normal_path_returns_true) {
+    /* Not fixed — delegates to pm_get_path_state which the stub
+     * returns NORMAL for. */
+    struct rpc_task *t = make_task(NULL, NULL, 0, false);
+    ck_assert(failover_prepare_transmit(t));
+} END_TEST
+
+/* Parametric: every flag combination → fixed-path predicate. */
+#define IS_FIXED_TEST(name, flags, expected) \
+    START_TEST(name) { \
+        struct rpc_task *t = make_task(NULL, NULL, (flags), false); \
+        ck_assert_int_eq((int)failover_is_task_use_fixed_path(t), (expected) ? 1 : 0); \
+    } END_TEST
+
+IS_FIXED_TEST(is_fixed_p_no_flags,                    0,                                                 false)
+IS_FIXED_TEST(is_fixed_p_FIXED_only,                  RPC_TASK_FIXED,                                    true)
+IS_FIXED_TEST(is_fixed_p_FIXED_ASYNC,                 RPC_TASK_FIXED | RPC_TASK_ASYNC,                   true)
+IS_FIXED_TEST(is_fixed_p_FIXED_SOFT,                  RPC_TASK_FIXED | RPC_TASK_SOFT,                    true)
+IS_FIXED_TEST(is_fixed_p_FIXED_NULLCREDS,             RPC_TASK_FIXED | RPC_TASK_NULLCREDS,               true)
+IS_FIXED_TEST(is_fixed_p_FIXED_SENT,                  RPC_TASK_FIXED | RPC_TASK_SENT,                    true)
+IS_FIXED_TEST(is_fixed_p_FIXED_all,
+              RPC_TASK_FIXED | RPC_TASK_ASYNC | RPC_TASK_SOFT |
+              RPC_TASK_NULLCREDS | RPC_TASK_SENT,                                                        true)
+IS_FIXED_TEST(is_fixed_p_ASYNC_only,                  RPC_TASK_ASYNC,                                    false)
+IS_FIXED_TEST(is_fixed_p_SOFT_only,                   RPC_TASK_SOFT,                                     false)
+IS_FIXED_TEST(is_fixed_p_NULLCREDS_only,              RPC_TASK_NULLCREDS,                                false)
+IS_FIXED_TEST(is_fixed_p_SENT_only,                   RPC_TASK_SENT,                                     false)
+IS_FIXED_TEST(is_fixed_p_ASYNC_SOFT,                  RPC_TASK_ASYNC | RPC_TASK_SOFT,                    false)
+IS_FIXED_TEST(is_fixed_p_ASYNC_SOFT_NULLCREDS,        RPC_TASK_ASYNC | RPC_TASK_SOFT | RPC_TASK_NULLCREDS, false)
+
+/* Cross-product: (cl_enfs, cl_prog, RPC_TASK_FIXED) → start_again. */
+#define START_AGAIN_TEST(name, prog, enfs_flag, flags, expected) \
+    START_TEST(name) { \
+        struct rpc_clnt *c = make_clnt(3); \
+        c->cl_prog = (prog); \
+        c->cl_enfs = (enfs_flag); \
+        c->cl_parent = c; \
+        struct rpc_task *t = make_task(c, NULL, (flags), false); \
+        ck_assert_int_eq((int)failover_task_need_call_start_again(t), \
+                          (expected) ? 1 : 0); \
+    } END_TEST
+
+START_AGAIN_TEST(start_again_p_aaa, NFS_PROGRAM,    1, 0,              true)
+START_AGAIN_TEST(start_again_p_bbb, NFS_PROGRAM,    1, RPC_TASK_FIXED, false)
+START_AGAIN_TEST(start_again_p_ccc, NFS_PROGRAM,    0, 0,              false)
+START_AGAIN_TEST(start_again_p_ddd, NFS_PROGRAM,    0, RPC_TASK_FIXED, false)
+START_AGAIN_TEST(start_again_p_eee, 999999,         1, 0,              false)
+START_AGAIN_TEST(start_again_p_fff, 999999,         1, RPC_TASK_FIXED, false)
+START_AGAIN_TEST(start_again_p_ggg, NFS_PROGRAM,    1, RPC_TASK_ASYNC, true)
+START_AGAIN_TEST(start_again_p_hhh, NFS_PROGRAM,    1, RPC_TASK_SOFT,  true)
+START_AGAIN_TEST(start_again_p_iii, NFS_PROGRAM,    1, RPC_TASK_NULLCREDS, true)
+START_AGAIN_TEST(start_again_p_jjj, NFS_PROGRAM,    1, RPC_TASK_SENT,  true)
+START_AGAIN_TEST(start_again_p_kkk, NFS_PROGRAM,    1,
+                  RPC_TASK_FIXED | RPC_TASK_ASYNC | RPC_TASK_SOFT,         false)
+
+/* Cross-product: (cl_prog, cl_enfs) → check_task return code. */
+#define CHECK_TASK_TEST(name, prog, enfs_flag, expected) \
+    START_TEST(name) { \
+        struct rpc_clnt *c = make_clnt(3); \
+        c->cl_prog = (prog); \
+        c->cl_enfs = (enfs_flag); \
+        c->cl_parent = c; \
+        struct rpc_task *t = make_task(c, NULL, 0, false); \
+        ck_assert_int_eq(failover_check_task(t), (expected)); \
+    } END_TEST
+
+CHECK_TASK_TEST(check_task_p_aaa, NFS_PROGRAM, 1, 0)
+CHECK_TASK_TEST(check_task_p_bbb, NFS_PROGRAM, 0, -EINVAL)
+CHECK_TASK_TEST(check_task_p_ccc, 999999,      1, -EINVAL)
+CHECK_TASK_TEST(check_task_p_ddd, 999999,      0, -EINVAL)
+CHECK_TASK_TEST(check_task_p_eee, NFS_PROGRAM + 1, 1, -EINVAL)
+CHECK_TASK_TEST(check_task_p_fff, 0,           1, -EINVAL)
+
+/* ============================================================ */
 /* Suite plumbing.                                              */
 /* ============================================================ */
 
@@ -522,6 +750,64 @@ static Suite *failover_path_suite(void)
     tcase_add_test(tcv4x, v4_top_getacl_sent);
     tcase_add_test(tcv4x, v4_top_delegreturn);
     suite_add_tcase(s, tcv4x);
+
+    TCase *tcck = tcase_create("check_task");
+    tcase_add_test(tcck, check_task_NULL_task_returns_EINVAL);
+    tcase_add_test(tcck, check_task_NULL_clnt_returns_EINVAL);
+    tcase_add_test(tcck, check_task_wrong_program_returns_EINVAL);
+    tcase_add_test(tcck, check_task_non_enfs_clnt_returns_EINVAL);
+    tcase_add_test(tcck, check_task_enfs_managed_returns_zero);
+    tcase_add_test(tcck, check_task_v4_child_walks_to_enfs_parent_returns_zero);
+    tcase_add_test(tcck, check_task_p_aaa);
+    tcase_add_test(tcck, check_task_p_bbb);
+    tcase_add_test(tcck, check_task_p_ccc);
+    tcase_add_test(tcck, check_task_p_ddd);
+    tcase_add_test(tcck, check_task_p_eee);
+    tcase_add_test(tcck, check_task_p_fff);
+    suite_add_tcase(s, tcck);
+
+    TCase *tcfp = tcase_create("is_task_use_fixed_path");
+    tcase_add_test(tcfp, is_fixed_RPC_TASK_FIXED_set_returns_true);
+    tcase_add_test(tcfp, is_fixed_no_FIXED_no_test_xprt_returns_false);
+    tcase_add_test(tcfp, is_fixed_FIXED_plus_other_flags_still_true);
+    tcase_add_test(tcfp, is_fixed_p_no_flags);
+    tcase_add_test(tcfp, is_fixed_p_FIXED_only);
+    tcase_add_test(tcfp, is_fixed_p_FIXED_ASYNC);
+    tcase_add_test(tcfp, is_fixed_p_FIXED_SOFT);
+    tcase_add_test(tcfp, is_fixed_p_FIXED_NULLCREDS);
+    tcase_add_test(tcfp, is_fixed_p_FIXED_SENT);
+    tcase_add_test(tcfp, is_fixed_p_FIXED_all);
+    tcase_add_test(tcfp, is_fixed_p_ASYNC_only);
+    tcase_add_test(tcfp, is_fixed_p_SOFT_only);
+    tcase_add_test(tcfp, is_fixed_p_NULLCREDS_only);
+    tcase_add_test(tcfp, is_fixed_p_SENT_only);
+    tcase_add_test(tcfp, is_fixed_p_ASYNC_SOFT);
+    tcase_add_test(tcfp, is_fixed_p_ASYNC_SOFT_NULLCREDS);
+    suite_add_tcase(s, tcfp);
+
+    TCase *tcsa = tcase_create("task_need_call_start_again");
+    tcase_add_test(tcsa, start_again_check_fails_returns_false);
+    tcase_add_test(tcsa, start_again_fixed_returns_false);
+    tcase_add_test(tcsa, start_again_eligible_returns_true);
+    tcase_add_test(tcsa, start_again_NULL_task_returns_false);
+    tcase_add_test(tcsa, start_again_NULL_clnt_returns_false);
+    tcase_add_test(tcsa, start_again_p_aaa);
+    tcase_add_test(tcsa, start_again_p_bbb);
+    tcase_add_test(tcsa, start_again_p_ccc);
+    tcase_add_test(tcsa, start_again_p_ddd);
+    tcase_add_test(tcsa, start_again_p_eee);
+    tcase_add_test(tcsa, start_again_p_fff);
+    tcase_add_test(tcsa, start_again_p_ggg);
+    tcase_add_test(tcsa, start_again_p_hhh);
+    tcase_add_test(tcsa, start_again_p_iii);
+    tcase_add_test(tcsa, start_again_p_jjj);
+    tcase_add_test(tcsa, start_again_p_kkk);
+    suite_add_tcase(s, tcsa);
+
+    TCase *tcpt = tcase_create("prepare_transmit");
+    tcase_add_test(tcpt, prepare_transmit_fixed_path_returns_true);
+    tcase_add_test(tcpt, prepare_transmit_normal_path_returns_true);
+    suite_add_tcase(s, tcpt);
 
     return s;
 }
