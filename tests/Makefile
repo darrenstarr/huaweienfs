@@ -99,7 +99,7 @@ LDLIBS := $(CHECK_LIBS) -lpthread
 
 TESTS := test_enfs_roundrobin test_enfs_multipath_parse test_loadbalance_simulator \
          test_pm_state test_failover_path test_enfs_path \
-         test_esunrpc_timer test_esunrpc_addr
+         test_esunrpc_timer test_esunrpc_addr test_esunrpc_xdr
 # test_esunrpc_xprtmultipath: needs more shim work (kobject, full
 # rpc_xprt, RPC_DISPLAY_*, idr); test source kept on disk, suite
 # TBD-enabled once shim is built out. Tracked as #44.
@@ -198,8 +198,8 @@ check: all
 	    echo "JUnit XML reports under $(BUILD_DIR)/junit/"; \
 	    exit 1; \
 	fi; \
-	total=$$(grep -h 'failures="' $(BUILD_DIR)/junit/*.xml 2>/dev/null \
-	    | sed -E 's/.*tests="([0-9]+)".*/\1/' | paste -sd+ - | bc); \
+	total=$$(grep -hc '<test ' $(BUILD_DIR)/junit/*.xml 2>/dev/null \
+	    | paste -sd+ - | bc); \
 	echo "OK: all $(words $(TESTS)) test binary(ies) passed ($$total individual cases)"; \
 	echo "JUnit XML reports under $(BUILD_DIR)/junit/"
 

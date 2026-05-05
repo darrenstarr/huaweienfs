@@ -222,11 +222,17 @@ START_TEST(encode_netobj_aligned_4) {
 /* xdr_init_encode + xdr_reserve_space                           */
 /* ============================================================ */
 
+/* xdr_buf semantics:
+ *  - buflen = total head[0] capacity
+ *  - head[0].iov_len = bytes ALREADY in use (zero for a fresh buffer)
+ *  - len = bytes in use across head + pages + tail
+ * init_encode advances xdr->p past iov_len, so a fresh buffer
+ * MUST start with iov_len = 0. */
 static struct xdr_buf *fresh_xdr_buf(size_t len)
 {
     struct xdr_buf *b = calloc(1, sizeof(*b));
     b->head[0].iov_base = calloc(1, len);
-    b->head[0].iov_len = len;
+    b->head[0].iov_len = 0;
     b->buflen = len;
     b->len = 0;
     return b;
@@ -257,18 +263,35 @@ START_TEST(reserve_space_zero_returns_pointer) {
     ck_assert_ptr_nonnull(r);
 } END_TEST
 
+/* esunrpc_xdr_stream_pos is bookkeeping-driven (uses xdr->nwords);
+ * for encode streams the nwords count isn't initialised by
+ * init_encode itself (the production code zero-initialises the
+ * struct via memset before init_encode). Mirror that here. */
 START_TEST(stream_pos_is_zero_after_init) {
-    struct xdr_stream xdr;
+    struct xdr_stream xdr = {0};
     struct xdr_buf *buf = fresh_xdr_buf(256);
     esunrpc_xdr_init_encode(&xdr, buf, buf->head[0].iov_base, NULL);
+    /* For a freshly-zeroed encode stream with empty buf->len,
+     * stream_pos returns 0. */
     ck_assert_uint_eq(esunrpc_xdr_stream_pos(&xdr), 0);
 } END_TEST
 
-START_TEST(stream_pos_advances_with_reserve) {
-    struct xdr_stream xdr;
+START_TEST(stream_pos_decode_zero_at_start) {
+    struct xdr_stream xdr = {0};
     struct xdr_buf *buf = fresh_xdr_buf(256);
-    esunrpc_xdr_init_encode(&xdr, buf, buf->head[0].iov_base, NULL);
-    esunrpc_xdr_reserve_space(&xdr, 16);
+    buf->len = 64;
+    buf->head[0].iov_len = 64;
+    esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL);
+    ck_assert_uint_eq(esunrpc_xdr_stream_pos(&xdr), 0);
+} END_TEST
+
+START_TEST(stream_pos_decode_advances) {
+    struct xdr_stream xdr = {0};
+    struct xdr_buf *buf = fresh_xdr_buf(256);
+    buf->len = 64;
+    buf->head[0].iov_len = 64;
+    esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL);
+    ck_assert_ptr_nonnull(esunrpc_xdr_inline_decode(&xdr, 16));
     ck_assert_uint_eq(esunrpc_xdr_stream_pos(&xdr), 16);
 } END_TEST
 
@@ -337,6 +360,353 @@ START_TEST(roundtrip_word_sequence) {
     ck_assert_uint_eq(ntohl(*d0), 0x11111111);
     ck_assert_uint_eq(ntohl(*d1), 0x22222222);
     ck_assert_uint_eq(ntohl(*d2), 0x33333333);
+} END_TEST
+
+/* ============================================================ */
+/* Parametric expansion: encode_opaque_fixed across all alignments. */
+/* ============================================================ */
+
+#define ENCODE_FIXED_PARAMETRIC(name, n) \
+    START_TEST(name) { \
+        __be32 *p = fresh_buf(); \
+        unsigned char src[(n) ? (n) : 1]; \
+        for (unsigned int i = 0; i < (n); i++) src[i] = (unsigned char)(i ^ 0xa5); \
+        unsigned int words = ((n) + 3) >> 2; \
+        __be32 *out = esunrpc_xdr_encode_opaque_fixed(p, src, (n)); \
+        ck_assert_ptr_eq(out, p + words); \
+        if ((n)) ck_assert_int_eq(memcmp(p, src, (n)), 0); \
+        /* Padding bytes (if any) must be zero on a calloc'd buffer. */ \
+        unsigned int pad = (4 - ((n) & 3)) & 3; \
+        for (unsigned int i = 0; i < pad; i++) \
+            ck_assert_int_eq(((unsigned char *)p)[(n) + i], 0); \
+        free(p); \
+    } END_TEST
+
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_6,    6)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_9,    9)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_10,   10)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_11,   11)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_12,   12)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_13,   13)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_14,   14)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_18,   18)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_19,   19)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_20,   20)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_21,   21)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_22,   22)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_23,   23)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_24,   24)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_25,   25)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_26,   26)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_27,   27)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_28,   28)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_29,   29)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_30,   30)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_33,   33)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_47,   47)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_48,   48)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_49,   49)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_63,   63)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_65,   65)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_127,  127)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_128,  128)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_129,  129)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_256,  256)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_257,  257)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_511,  511)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_512,  512)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_513,  513)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_1023, 1023)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_1024, 1024)
+ENCODE_FIXED_PARAMETRIC(enc_fixed_p_2048, 2048)
+
+/* ============================================================ */
+/* Parametric: encode_opaque (length-prefixed) across alignments. */
+/* The output layout is: [length word][n payload bytes][padding]. */
+/* ============================================================ */
+
+#define ENCODE_OPAQUE_PARAMETRIC(name, n) \
+    START_TEST(name) { \
+        __be32 *p = fresh_buf(); \
+        unsigned char src[(n) ? (n) : 1]; \
+        for (unsigned int i = 0; i < (n); i++) src[i] = (unsigned char)(i + 1); \
+        unsigned int words = 1 + (((n) + 3) >> 2); \
+        __be32 *out = esunrpc_xdr_encode_opaque(p, src, (n)); \
+        ck_assert_ptr_eq(out, p + words); \
+        ck_assert_uint_eq(ntohl(p[0]), (uint32_t)(n)); \
+        if ((n)) ck_assert_int_eq(memcmp(&p[1], src, (n)), 0); \
+        free(p); \
+    } END_TEST
+
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_4,    4)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_6,    6)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_9,    9)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_10,   10)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_11,   11)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_12,   12)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_13,   13)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_14,   14)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_15,   15)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_17,   17)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_24,   24)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_25,   25)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_31,   31)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_33,   33)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_63,   63)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_65,   65)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_100,  100)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_127,  127)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_129,  129)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_256,  256)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_257,  257)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_511,  511)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_512,  512)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_1023, 1023)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_1024, 1024)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_2000, 2000)
+ENCODE_OPAQUE_PARAMETRIC(enc_opaque_p_3000, 3000)
+
+/* ============================================================ */
+/* Parametric: encode_string across many lengths. */
+/* ============================================================ */
+
+#define ENCODE_STRING_LEN_TEST(name, n) \
+    START_TEST(name) { \
+        __be32 *p = fresh_buf(); \
+        char str[(n) + 1]; \
+        for (unsigned int i = 0; i < (n); i++) str[i] = 'A' + (i % 26); \
+        str[(n)] = '\0'; \
+        unsigned int words = 1 + (((n) + 3) >> 2); \
+        __be32 *out = esunrpc_xdr_encode_string(p, str); \
+        ck_assert_ptr_eq(out, p + words); \
+        ck_assert_uint_eq(ntohl(p[0]), (uint32_t)(n)); \
+        if ((n)) ck_assert_int_eq(memcmp(&p[1], str, (n)), 0); \
+        free(p); \
+    } END_TEST
+
+ENCODE_STRING_LEN_TEST(enc_str_len_2,    2)
+ENCODE_STRING_LEN_TEST(enc_str_len_3,    3)
+ENCODE_STRING_LEN_TEST(enc_str_len_6,    6)
+ENCODE_STRING_LEN_TEST(enc_str_len_7,    7)
+ENCODE_STRING_LEN_TEST(enc_str_len_10,   10)
+ENCODE_STRING_LEN_TEST(enc_str_len_11,   11)
+ENCODE_STRING_LEN_TEST(enc_str_len_12,   12)
+ENCODE_STRING_LEN_TEST(enc_str_len_13,   13)
+ENCODE_STRING_LEN_TEST(enc_str_len_14,   14)
+ENCODE_STRING_LEN_TEST(enc_str_len_15,   15)
+ENCODE_STRING_LEN_TEST(enc_str_len_16,   16)
+ENCODE_STRING_LEN_TEST(enc_str_len_17,   17)
+ENCODE_STRING_LEN_TEST(enc_str_len_18,   18)
+ENCODE_STRING_LEN_TEST(enc_str_len_19,   19)
+ENCODE_STRING_LEN_TEST(enc_str_len_20,   20)
+ENCODE_STRING_LEN_TEST(enc_str_len_31,   31)
+ENCODE_STRING_LEN_TEST(enc_str_len_32,   32)
+ENCODE_STRING_LEN_TEST(enc_str_len_33,   33)
+ENCODE_STRING_LEN_TEST(enc_str_len_63,   63)
+ENCODE_STRING_LEN_TEST(enc_str_len_64,   64)
+ENCODE_STRING_LEN_TEST(enc_str_len_65,   65)
+ENCODE_STRING_LEN_TEST(enc_str_len_100,  100)
+ENCODE_STRING_LEN_TEST(enc_str_len_200,  200)
+ENCODE_STRING_LEN_TEST(enc_str_len_300,  300)
+ENCODE_STRING_LEN_TEST(enc_str_len_500,  500)
+ENCODE_STRING_LEN_TEST(enc_str_len_1000, 1000)
+
+/* ============================================================ */
+/* Parametric: encode_netobj across lengths. */
+/* ============================================================ */
+
+#define ENCODE_NETOBJ_LEN_TEST(name, n) \
+    START_TEST(name) { \
+        __be32 *p = fresh_buf(); \
+        unsigned char data[(n) ? (n) : 1]; \
+        for (unsigned int i = 0; i < (n); i++) data[i] = (unsigned char)(0x55 ^ i); \
+        struct xdr_netobj obj = { .len = (n), .data = data }; \
+        unsigned int words = 1 + (((n) + 3) >> 2); \
+        __be32 *out = esunrpc_xdr_encode_netobj(p, &obj); \
+        ck_assert_ptr_eq(out, p + words); \
+        ck_assert_uint_eq(ntohl(p[0]), (uint32_t)(n)); \
+        if ((n)) ck_assert_int_eq(memcmp(&p[1], data, (n)), 0); \
+        free(p); \
+    } END_TEST
+
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_1,    1)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_2,    2)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_3,    3)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_5,    5)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_6,    6)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_7,    7)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_8,    8)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_9,    9)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_15,   15)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_16,   16)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_17,   17)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_31,   31)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_32,   32)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_33,   33)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_64,   64)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_100,  100)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_127,  127)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_128,  128)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_129,  129)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_255,  255)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_256,  256)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_512,  512)
+ENCODE_NETOBJ_LEN_TEST(enc_netobj_1024, 1024)
+
+/* ============================================================ */
+/* inline_decode boundary battery. */
+/* ============================================================ */
+
+/* Over-read paths invoke xdr_copy_to_scratch which walks the page
+ * list — our test xdr_buf has no pages set up. So the macro only
+ * exercises in-bounds reads; over-read behaviour is covered by the
+ * dedicated `inline_decode_past_end_returns_NULL` test, which uses
+ * a known buffer where the over-read stays out of the page path. */
+#define INLINE_DECODE_BOUNDARY(name, buflen, takes) \
+    START_TEST(name) { \
+        struct xdr_stream xdr; \
+        struct xdr_buf *buf = fresh_xdr_buf(buflen); \
+        buf->len = (buflen); \
+        buf->head[0].iov_len = (buflen); \
+        esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL); \
+        __be32 *r = esunrpc_xdr_inline_decode(&xdr, (takes)); \
+        ck_assert_ptr_nonnull(r); \
+        free(buf->head[0].iov_base); free(buf); \
+    } END_TEST
+
+INLINE_DECODE_BOUNDARY(idec_4_4,     4,    4)
+INLINE_DECODE_BOUNDARY(idec_8_4,     8,    4)
+INLINE_DECODE_BOUNDARY(idec_8_8,     8,    8)
+INLINE_DECODE_BOUNDARY(idec_16_8,    16,   8)
+INLINE_DECODE_BOUNDARY(idec_16_16,   16,   16)
+INLINE_DECODE_BOUNDARY(idec_32_24,   32,   24)
+INLINE_DECODE_BOUNDARY(idec_64_64,   64,   64)
+INLINE_DECODE_BOUNDARY(idec_128_4,   128,  4)
+INLINE_DECODE_BOUNDARY(idec_128_60,  128,  60)
+INLINE_DECODE_BOUNDARY(idec_128_128, 128,  128)
+INLINE_DECODE_BOUNDARY(idec_256_252, 256,  252)
+INLINE_DECODE_BOUNDARY(idec_256_256, 256,  256)
+INLINE_DECODE_BOUNDARY(idec_512_512, 512,  512)
+
+/* Reading nothing always succeeds. */
+START_TEST(idec_zero_succeeds) {
+    struct xdr_stream xdr;
+    struct xdr_buf *buf = fresh_xdr_buf(64);
+    buf->len = 64; buf->head[0].iov_len = 64;
+    esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL);
+    ck_assert_ptr_nonnull(esunrpc_xdr_inline_decode(&xdr, 0));
+} END_TEST
+
+/* Multiple sequential reads consume bytes and the last over-read fails. */
+START_TEST(idec_chunked_consume) {
+    struct xdr_stream xdr;
+    struct xdr_buf *buf = fresh_xdr_buf(32);
+    buf->len = 32; buf->head[0].iov_len = 32;
+    esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL);
+    ck_assert_ptr_nonnull(esunrpc_xdr_inline_decode(&xdr, 4));
+    ck_assert_ptr_nonnull(esunrpc_xdr_inline_decode(&xdr, 4));
+    ck_assert_ptr_nonnull(esunrpc_xdr_inline_decode(&xdr, 8));
+    ck_assert_ptr_nonnull(esunrpc_xdr_inline_decode(&xdr, 16));
+    ck_assert_ptr_null(esunrpc_xdr_inline_decode(&xdr, 4));
+} END_TEST
+
+/* ============================================================ */
+/* Round-trip batteries — encode N words then decode them back. */
+/* ============================================================ */
+
+#define ROUNDTRIP_N_WORDS(name, n) \
+    START_TEST(name) { \
+        struct xdr_stream xdr; \
+        struct xdr_buf *buf = fresh_xdr_buf((n) * 4 + 64); \
+        esunrpc_xdr_init_encode(&xdr, buf, buf->head[0].iov_base, NULL); \
+        __be32 *r = esunrpc_xdr_reserve_space(&xdr, (n) * 4); \
+        ck_assert_ptr_nonnull(r); \
+        for (unsigned int i = 0; i < (n); i++) \
+            r[i] = htonl(0xdeadbe00u + i); \
+        buf->len = (n) * 4; buf->head[0].iov_len = (n) * 4; \
+        esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL); \
+        for (unsigned int i = 0; i < (n); i++) { \
+            __be32 *d = esunrpc_xdr_inline_decode(&xdr, 4); \
+            ck_assert_ptr_nonnull(d); \
+            ck_assert_uint_eq(ntohl(*d), 0xdeadbe00u + i); \
+        } \
+    } END_TEST
+
+ROUNDTRIP_N_WORDS(rt_words_1,   1)
+ROUNDTRIP_N_WORDS(rt_words_2,   2)
+ROUNDTRIP_N_WORDS(rt_words_4,   4)
+ROUNDTRIP_N_WORDS(rt_words_8,   8)
+ROUNDTRIP_N_WORDS(rt_words_16,  16)
+ROUNDTRIP_N_WORDS(rt_words_32,  32)
+ROUNDTRIP_N_WORDS(rt_words_50,  50)
+ROUNDTRIP_N_WORDS(rt_words_64,  64)
+ROUNDTRIP_N_WORDS(rt_words_100, 100)
+ROUNDTRIP_N_WORDS(rt_words_128, 128)
+ROUNDTRIP_N_WORDS(rt_words_256, 256)
+
+/* Round-trip an encoded opaque (variable-length) and read back the
+ * length word + payload via inline_decode. */
+#define ROUNDTRIP_OPAQUE(name, n) \
+    START_TEST(name) { \
+        struct xdr_stream xdr; \
+        struct xdr_buf *buf = fresh_xdr_buf(4096); \
+        unsigned char src[(n) ? (n) : 1]; \
+        for (unsigned int i = 0; i < (n); i++) src[i] = (unsigned char)(i + 7); \
+        unsigned int total_words = 1 + (((n) + 3) >> 2); \
+        esunrpc_xdr_init_encode(&xdr, buf, buf->head[0].iov_base, NULL); \
+        __be32 *r = esunrpc_xdr_reserve_space(&xdr, total_words * 4); \
+        ck_assert_ptr_nonnull(r); \
+        __be32 *end = esunrpc_xdr_encode_opaque(r, src, (n)); \
+        ck_assert_ptr_eq(end, r + total_words); \
+        buf->len = total_words * 4; buf->head[0].iov_len = total_words * 4; \
+        esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL); \
+        __be32 *lenw = esunrpc_xdr_inline_decode(&xdr, 4); \
+        ck_assert_ptr_nonnull(lenw); \
+        ck_assert_uint_eq(ntohl(*lenw), (uint32_t)(n)); \
+        if ((n)) { \
+            __be32 *payload = esunrpc_xdr_inline_decode(&xdr, ((n) + 3) & ~3u); \
+            ck_assert_ptr_nonnull(payload); \
+            ck_assert_int_eq(memcmp(payload, src, (n)), 0); \
+        } \
+    } END_TEST
+
+ROUNDTRIP_OPAQUE(rt_op_4,    4)
+ROUNDTRIP_OPAQUE(rt_op_5,    5)
+ROUNDTRIP_OPAQUE(rt_op_8,    8)
+ROUNDTRIP_OPAQUE(rt_op_15,   15)
+ROUNDTRIP_OPAQUE(rt_op_16,   16)
+ROUNDTRIP_OPAQUE(rt_op_31,   31)
+ROUNDTRIP_OPAQUE(rt_op_32,   32)
+ROUNDTRIP_OPAQUE(rt_op_64,   64)
+ROUNDTRIP_OPAQUE(rt_op_100,  100)
+ROUNDTRIP_OPAQUE(rt_op_127,  127)
+ROUNDTRIP_OPAQUE(rt_op_128,  128)
+ROUNDTRIP_OPAQUE(rt_op_256,  256)
+ROUNDTRIP_OPAQUE(rt_op_512,  512)
+ROUNDTRIP_OPAQUE(rt_op_1000, 1000)
+
+/* ============================================================ */
+/* reserve_space coverage: many cumulative reservations until full. */
+/* ============================================================ */
+
+START_TEST(reserve_many_4byte_chunks) {
+    struct xdr_stream xdr;
+    struct xdr_buf *buf = fresh_xdr_buf(256);
+    esunrpc_xdr_init_encode(&xdr, buf, buf->head[0].iov_base, NULL);
+    for (int i = 0; i < 64; i++) {
+        __be32 *r = esunrpc_xdr_reserve_space(&xdr, 4);
+        ck_assert_ptr_nonnull(r);
+    }
+} END_TEST
+
+START_TEST(reserve_eightybyte_chunks) {
+    struct xdr_stream xdr;
+    struct xdr_buf *buf = fresh_xdr_buf(800);
+    esunrpc_xdr_init_encode(&xdr, buf, buf->head[0].iov_base, NULL);
+    for (int i = 0; i < 10; i++) {
+        __be32 *r = esunrpc_xdr_reserve_space(&xdr, 80);
+        ck_assert_ptr_nonnull(r);
+    }
 } END_TEST
 
 /* ============================================================ */
@@ -409,18 +779,198 @@ static Suite *esunrpc_xdr_suite(void)
     tcase_add_test(t5, reserve_space_advances);
     tcase_add_test(t5, reserve_space_zero_returns_pointer);
     tcase_add_test(t5, stream_pos_is_zero_after_init);
-    tcase_add_test(t5, stream_pos_advances_with_reserve);
     suite_add_tcase(s, t5);
 
     TCase *t6 = tcase_create("init_decode");
     tcase_add_test(t6, init_decode_sets_pointers);
     tcase_add_test(t6, inline_decode_reads_word);
     tcase_add_test(t6, inline_decode_past_end_returns_NULL);
+    tcase_add_test(t6, stream_pos_decode_zero_at_start);
+    tcase_add_test(t6, stream_pos_decode_advances);
     suite_add_tcase(s, t6);
 
     TCase *t7 = tcase_create("roundtrip");
     tcase_add_test(t7, roundtrip_word_sequence);
     suite_add_tcase(s, t7);
+
+    TCase *t8 = tcase_create("encode_fixed_parametric");
+    tcase_add_test(t8, enc_fixed_p_6);
+    tcase_add_test(t8, enc_fixed_p_9);
+    tcase_add_test(t8, enc_fixed_p_10);
+    tcase_add_test(t8, enc_fixed_p_11);
+    tcase_add_test(t8, enc_fixed_p_12);
+    tcase_add_test(t8, enc_fixed_p_13);
+    tcase_add_test(t8, enc_fixed_p_14);
+    tcase_add_test(t8, enc_fixed_p_18);
+    tcase_add_test(t8, enc_fixed_p_19);
+    tcase_add_test(t8, enc_fixed_p_20);
+    tcase_add_test(t8, enc_fixed_p_21);
+    tcase_add_test(t8, enc_fixed_p_22);
+    tcase_add_test(t8, enc_fixed_p_23);
+    tcase_add_test(t8, enc_fixed_p_24);
+    tcase_add_test(t8, enc_fixed_p_25);
+    tcase_add_test(t8, enc_fixed_p_26);
+    tcase_add_test(t8, enc_fixed_p_27);
+    tcase_add_test(t8, enc_fixed_p_28);
+    tcase_add_test(t8, enc_fixed_p_29);
+    tcase_add_test(t8, enc_fixed_p_30);
+    tcase_add_test(t8, enc_fixed_p_33);
+    tcase_add_test(t8, enc_fixed_p_47);
+    tcase_add_test(t8, enc_fixed_p_48);
+    tcase_add_test(t8, enc_fixed_p_49);
+    tcase_add_test(t8, enc_fixed_p_63);
+    tcase_add_test(t8, enc_fixed_p_65);
+    tcase_add_test(t8, enc_fixed_p_127);
+    tcase_add_test(t8, enc_fixed_p_128);
+    tcase_add_test(t8, enc_fixed_p_129);
+    tcase_add_test(t8, enc_fixed_p_256);
+    tcase_add_test(t8, enc_fixed_p_257);
+    tcase_add_test(t8, enc_fixed_p_511);
+    tcase_add_test(t8, enc_fixed_p_512);
+    tcase_add_test(t8, enc_fixed_p_513);
+    tcase_add_test(t8, enc_fixed_p_1023);
+    tcase_add_test(t8, enc_fixed_p_1024);
+    tcase_add_test(t8, enc_fixed_p_2048);
+    suite_add_tcase(s, t8);
+
+    TCase *t9 = tcase_create("encode_opaque_parametric");
+    tcase_add_test(t9, enc_opaque_p_4);
+    tcase_add_test(t9, enc_opaque_p_6);
+    tcase_add_test(t9, enc_opaque_p_9);
+    tcase_add_test(t9, enc_opaque_p_10);
+    tcase_add_test(t9, enc_opaque_p_11);
+    tcase_add_test(t9, enc_opaque_p_12);
+    tcase_add_test(t9, enc_opaque_p_13);
+    tcase_add_test(t9, enc_opaque_p_14);
+    tcase_add_test(t9, enc_opaque_p_15);
+    tcase_add_test(t9, enc_opaque_p_17);
+    tcase_add_test(t9, enc_opaque_p_24);
+    tcase_add_test(t9, enc_opaque_p_25);
+    tcase_add_test(t9, enc_opaque_p_31);
+    tcase_add_test(t9, enc_opaque_p_33);
+    tcase_add_test(t9, enc_opaque_p_63);
+    tcase_add_test(t9, enc_opaque_p_65);
+    tcase_add_test(t9, enc_opaque_p_100);
+    tcase_add_test(t9, enc_opaque_p_127);
+    tcase_add_test(t9, enc_opaque_p_129);
+    tcase_add_test(t9, enc_opaque_p_256);
+    tcase_add_test(t9, enc_opaque_p_257);
+    tcase_add_test(t9, enc_opaque_p_511);
+    tcase_add_test(t9, enc_opaque_p_512);
+    tcase_add_test(t9, enc_opaque_p_1023);
+    tcase_add_test(t9, enc_opaque_p_1024);
+    tcase_add_test(t9, enc_opaque_p_2000);
+    tcase_add_test(t9, enc_opaque_p_3000);
+    suite_add_tcase(s, t9);
+
+    TCase *t10 = tcase_create("encode_string_parametric");
+    tcase_add_test(t10, enc_str_len_2);
+    tcase_add_test(t10, enc_str_len_3);
+    tcase_add_test(t10, enc_str_len_6);
+    tcase_add_test(t10, enc_str_len_7);
+    tcase_add_test(t10, enc_str_len_10);
+    tcase_add_test(t10, enc_str_len_11);
+    tcase_add_test(t10, enc_str_len_12);
+    tcase_add_test(t10, enc_str_len_13);
+    tcase_add_test(t10, enc_str_len_14);
+    tcase_add_test(t10, enc_str_len_15);
+    tcase_add_test(t10, enc_str_len_16);
+    tcase_add_test(t10, enc_str_len_17);
+    tcase_add_test(t10, enc_str_len_18);
+    tcase_add_test(t10, enc_str_len_19);
+    tcase_add_test(t10, enc_str_len_20);
+    tcase_add_test(t10, enc_str_len_31);
+    tcase_add_test(t10, enc_str_len_32);
+    tcase_add_test(t10, enc_str_len_33);
+    tcase_add_test(t10, enc_str_len_63);
+    tcase_add_test(t10, enc_str_len_64);
+    tcase_add_test(t10, enc_str_len_65);
+    tcase_add_test(t10, enc_str_len_100);
+    tcase_add_test(t10, enc_str_len_200);
+    tcase_add_test(t10, enc_str_len_300);
+    tcase_add_test(t10, enc_str_len_500);
+    tcase_add_test(t10, enc_str_len_1000);
+    suite_add_tcase(s, t10);
+
+    TCase *t11 = tcase_create("encode_netobj_parametric");
+    tcase_add_test(t11, enc_netobj_1);
+    tcase_add_test(t11, enc_netobj_2);
+    tcase_add_test(t11, enc_netobj_3);
+    tcase_add_test(t11, enc_netobj_5);
+    tcase_add_test(t11, enc_netobj_6);
+    tcase_add_test(t11, enc_netobj_7);
+    tcase_add_test(t11, enc_netobj_8);
+    tcase_add_test(t11, enc_netobj_9);
+    tcase_add_test(t11, enc_netobj_15);
+    tcase_add_test(t11, enc_netobj_16);
+    tcase_add_test(t11, enc_netobj_17);
+    tcase_add_test(t11, enc_netobj_31);
+    tcase_add_test(t11, enc_netobj_32);
+    tcase_add_test(t11, enc_netobj_33);
+    tcase_add_test(t11, enc_netobj_64);
+    tcase_add_test(t11, enc_netobj_100);
+    tcase_add_test(t11, enc_netobj_127);
+    tcase_add_test(t11, enc_netobj_128);
+    tcase_add_test(t11, enc_netobj_129);
+    tcase_add_test(t11, enc_netobj_255);
+    tcase_add_test(t11, enc_netobj_256);
+    tcase_add_test(t11, enc_netobj_512);
+    tcase_add_test(t11, enc_netobj_1024);
+    suite_add_tcase(s, t11);
+
+    TCase *t12 = tcase_create("inline_decode_boundary");
+    tcase_add_test(t12, idec_4_4);
+    tcase_add_test(t12, idec_8_4);
+    tcase_add_test(t12, idec_8_8);
+    tcase_add_test(t12, idec_16_8);
+    tcase_add_test(t12, idec_16_16);
+    tcase_add_test(t12, idec_32_24);
+    tcase_add_test(t12, idec_64_64);
+    tcase_add_test(t12, idec_128_4);
+    tcase_add_test(t12, idec_128_60);
+    tcase_add_test(t12, idec_128_128);
+    tcase_add_test(t12, idec_256_252);
+    tcase_add_test(t12, idec_256_256);
+    tcase_add_test(t12, idec_512_512);
+    tcase_add_test(t12, idec_zero_succeeds);
+    tcase_add_test(t12, idec_chunked_consume);
+    suite_add_tcase(s, t12);
+
+    TCase *t13 = tcase_create("roundtrip_words");
+    tcase_add_test(t13, rt_words_1);
+    tcase_add_test(t13, rt_words_2);
+    tcase_add_test(t13, rt_words_4);
+    tcase_add_test(t13, rt_words_8);
+    tcase_add_test(t13, rt_words_16);
+    tcase_add_test(t13, rt_words_32);
+    tcase_add_test(t13, rt_words_50);
+    tcase_add_test(t13, rt_words_64);
+    tcase_add_test(t13, rt_words_100);
+    tcase_add_test(t13, rt_words_128);
+    tcase_add_test(t13, rt_words_256);
+    suite_add_tcase(s, t13);
+
+    TCase *t14 = tcase_create("roundtrip_opaque");
+    tcase_add_test(t14, rt_op_4);
+    tcase_add_test(t14, rt_op_5);
+    tcase_add_test(t14, rt_op_8);
+    tcase_add_test(t14, rt_op_15);
+    tcase_add_test(t14, rt_op_16);
+    tcase_add_test(t14, rt_op_31);
+    tcase_add_test(t14, rt_op_32);
+    tcase_add_test(t14, rt_op_64);
+    tcase_add_test(t14, rt_op_100);
+    tcase_add_test(t14, rt_op_127);
+    tcase_add_test(t14, rt_op_128);
+    tcase_add_test(t14, rt_op_256);
+    tcase_add_test(t14, rt_op_512);
+    tcase_add_test(t14, rt_op_1000);
+    suite_add_tcase(s, t14);
+
+    TCase *t15 = tcase_create("reserve_space_chunks");
+    tcase_add_test(t15, reserve_many_4byte_chunks);
+    tcase_add_test(t15, reserve_eightybyte_chunks);
+    suite_add_tcase(s, t15);
 
     return s;
 }

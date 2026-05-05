@@ -232,6 +232,53 @@ int enfs_test_snprintf(char *buf, size_t size, const char *fmt, ...);
 #define snprintf enfs_test_snprintf
 #endif
 
+/* Misc kernel keywords + macros that some SUTs need but the shim
+ * tree doesn't otherwise provide. */
+#ifndef noinline
+#define noinline __attribute__((noinline))
+#endif
+#ifndef __maybe_unused
+#define __maybe_unused __attribute__((unused))
+#endif
+#ifndef __always_inline
+#define __always_inline inline __attribute__((always_inline))
+#endif
+#ifndef struct_size
+#define struct_size(p, member, n) (sizeof(*(p)) + sizeof((p)->member[0]) * (n))
+#endif
+
+/* Kernel min/max helpers used in xdr.c. */
+#ifndef min_t
+#define min_t(t, x, y) ({ t _x = (x); t _y = (y); _x < _y ? _x : _y; })
+#endif
+#ifndef max_t
+#define max_t(t, x, y) ({ t _x = (x); t _y = (y); _x > _y ? _x : _y; })
+#endif
+#ifndef min
+#define min(x, y) ({ typeof(x) _x = (x); typeof(y) _y = (y); _x < _y ? _x : _y; })
+#endif
+#ifndef max
+#define max(x, y) ({ typeof(x) _x = (x); typeof(y) _y = (y); _x > _y ? _x : _y; })
+#endif
+
+/* xdr.c uses bvec_set_page; stub. */
+struct bio_vec;
+struct page;
+static inline void bvec_set_page(struct bio_vec *bv, struct page *p,
+                                  unsigned int len, unsigned int off)
+{ (void)bv; (void)p; (void)len; (void)off; }
+
+/* scatterlist forward decl + RPC auth max size; xdr.c uses these
+ * in code paths the tests don't exercise. */
+struct scatterlist {
+    unsigned long page_link;
+    unsigned int  offset;
+    unsigned int  length;
+};
+#ifndef RPC_MAX_AUTH_SIZE
+#define RPC_MAX_AUTH_SIZE 400
+#endif
+
 /* Forward decl for things below */
 struct rpc_xprt;
 struct rpc_clnt;
