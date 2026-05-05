@@ -295,6 +295,36 @@ START_TEST(stream_pos_decode_advances) {
     ck_assert_uint_eq(esunrpc_xdr_stream_pos(&xdr), 16);
 } END_TEST
 
+/* Parametric: stream_pos == sum of bytes consumed across N reads. */
+#define STREAM_POS_AFTER_N_READS(name, buflen, take_each, count, expected) \
+    START_TEST(name) { \
+        struct xdr_stream xdr = {0}; \
+        struct xdr_buf *buf = fresh_xdr_buf(buflen); \
+        buf->len = (buflen); buf->head[0].iov_len = (buflen); \
+        esunrpc_xdr_init_decode(&xdr, buf, buf->head[0].iov_base, NULL); \
+        for (int i = 0; i < (count); i++) \
+            ck_assert_ptr_nonnull(esunrpc_xdr_inline_decode(&xdr, (take_each))); \
+        ck_assert_uint_eq(esunrpc_xdr_stream_pos(&xdr), (expected)); \
+    } END_TEST
+
+STREAM_POS_AFTER_N_READS(spos_4x1,    64,  4,  1,  4)
+STREAM_POS_AFTER_N_READS(spos_4x2,    64,  4,  2,  8)
+STREAM_POS_AFTER_N_READS(spos_4x4,    64,  4,  4, 16)
+STREAM_POS_AFTER_N_READS(spos_4x8,    64,  4,  8, 32)
+STREAM_POS_AFTER_N_READS(spos_4x16,   64,  4, 16, 64)
+STREAM_POS_AFTER_N_READS(spos_8x1,    64,  8,  1,  8)
+STREAM_POS_AFTER_N_READS(spos_8x4,    64,  8,  4, 32)
+STREAM_POS_AFTER_N_READS(spos_8x8,    64,  8,  8, 64)
+STREAM_POS_AFTER_N_READS(spos_16x1,  256, 16,  1, 16)
+STREAM_POS_AFTER_N_READS(spos_16x4,  256, 16,  4, 64)
+STREAM_POS_AFTER_N_READS(spos_16x16, 256, 16, 16,256)
+STREAM_POS_AFTER_N_READS(spos_32x1,  256, 32,  1, 32)
+STREAM_POS_AFTER_N_READS(spos_32x4,  256, 32,  4,128)
+STREAM_POS_AFTER_N_READS(spos_64x4,  512, 64,  4,256)
+STREAM_POS_AFTER_N_READS(spos_64x8,  512, 64,  8,512)
+STREAM_POS_AFTER_N_READS(spos_128x4, 1024,128, 4,512)
+STREAM_POS_AFTER_N_READS(spos_128x8, 1024,128, 8,1024)
+
 /* ============================================================ */
 /* xdr_init_decode + xdr_inline_decode                           */
 /* ============================================================ */
@@ -1231,6 +1261,23 @@ static Suite *esunrpc_xdr_suite(void)
     tcase_add_test(t6, inline_decode_past_end_returns_NULL);
     tcase_add_test(t6, stream_pos_decode_zero_at_start);
     tcase_add_test(t6, stream_pos_decode_advances);
+    tcase_add_test(t6, spos_4x1);
+    tcase_add_test(t6, spos_4x2);
+    tcase_add_test(t6, spos_4x4);
+    tcase_add_test(t6, spos_4x8);
+    tcase_add_test(t6, spos_4x16);
+    tcase_add_test(t6, spos_8x1);
+    tcase_add_test(t6, spos_8x4);
+    tcase_add_test(t6, spos_8x8);
+    tcase_add_test(t6, spos_16x1);
+    tcase_add_test(t6, spos_16x4);
+    tcase_add_test(t6, spos_16x16);
+    tcase_add_test(t6, spos_32x1);
+    tcase_add_test(t6, spos_32x4);
+    tcase_add_test(t6, spos_64x4);
+    tcase_add_test(t6, spos_64x8);
+    tcase_add_test(t6, spos_128x4);
+    tcase_add_test(t6, spos_128x8);
     suite_add_tcase(s, t6);
 
     TCase *t7 = tcase_create("roundtrip");
