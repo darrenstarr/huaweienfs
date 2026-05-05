@@ -333,6 +333,249 @@ START_TEST(stress_NULL_calls_repeated) {
 } END_TEST
 
 /* ============================================================ */
+/* pm_get_path_state_desc — renders the path state as a string. */
+/* Tests the full switch + safety branches.                     */
+/* ============================================================ */
+
+void pm_get_path_state_desc(struct rpc_xprt *xprt, char *buf, int len);
+void pm_get_xprt_state_desc(struct rpc_xprt *xprt, char *buf, int len);
+
+START_TEST(path_desc_INIT_renders_Init) {
+    char buf[16] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_INIT);
+    pm_get_path_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "Init");
+} END_TEST
+
+START_TEST(path_desc_NORMAL_renders_Normal) {
+    char buf[16] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    pm_get_path_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "Normal");
+} END_TEST
+
+START_TEST(path_desc_UNSTABLE_renders_Unstable) {
+    char buf[16] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_UNSTABLE);
+    pm_get_path_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "Unstable");
+} END_TEST
+
+START_TEST(path_desc_FAULT_renders_Fault) {
+    char buf[16] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_FAULT);
+    pm_get_path_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "Fault");
+} END_TEST
+
+START_TEST(path_desc_UNDEFINED_renders_Unknown) {
+    char buf[16] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_UNDEFINED);
+    pm_get_path_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "Unknown");
+} END_TEST
+
+START_TEST(path_desc_NULL_xprt_no_op_buf_unchanged) {
+    char buf[16] = "PRESERVED";
+    pm_get_path_state_desc(NULL, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "PRESERVED");
+} END_TEST
+
+START_TEST(path_desc_NULL_buf_no_op) {
+    /* Just ensure no crash. */
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    pm_get_path_state_desc(x, NULL, 16);
+} END_TEST
+
+START_TEST(path_desc_zero_len_no_op) {
+    char buf[16] = "PRESERVED";
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    pm_get_path_state_desc(x, buf, 0);
+    ck_assert_str_eq(buf, "PRESERVED");
+} END_TEST
+
+START_TEST(path_desc_negative_len_no_op) {
+    char buf[16] = "PRESERVED";
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    pm_get_path_state_desc(x, buf, -1);
+    ck_assert_str_eq(buf, "PRESERVED");
+} END_TEST
+
+/* Render to a buffer that's TOO small — snprintf truncates. */
+START_TEST(path_desc_short_buffer_truncates) {
+    char buf[3] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    pm_get_path_state_desc(x, buf, sizeof(buf));
+    /* "Normal" → buf gets at most 2 chars + NUL: "No". */
+    ck_assert_int_eq(strlen(buf), 2);
+    ck_assert_int_eq(buf[0], 'N');
+} END_TEST
+
+START_TEST(path_desc_no_ctx_renders_Unknown) {
+    /* xprt with no enfs ctx → pm_get_path_state returns UNDEFINED
+     * which falls into the default branch → "Unknown". */
+    char buf[16] = {0};
+    struct rpc_xprt *x = make_xprt_without_ctx();
+    pm_get_path_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "Unknown");
+} END_TEST
+
+/* ============================================================ */
+/* pm_get_xprt_state_desc — renders xprt state bits as          */
+/* PIPE-separated names (LOCKED|CONNECTED|...).                 */
+/* ============================================================ */
+
+START_TEST(xprt_desc_no_bits_yields_empty) {
+    char buf[64] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    x->state = 0;
+    pm_get_xprt_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "");
+} END_TEST
+
+START_TEST(xprt_desc_LOCKED_only) {
+    char buf[64] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    x->state = (1UL << XPRT_LOCKED);
+    pm_get_xprt_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "LOCKED");
+} END_TEST
+
+START_TEST(xprt_desc_CONNECTED_only) {
+    char buf[64] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    x->state = (1UL << XPRT_CONNECTED);
+    pm_get_xprt_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "CONNECTED");
+} END_TEST
+
+START_TEST(xprt_desc_BOUND_only) {
+    char buf[64] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    x->state = (1UL << XPRT_BOUND);
+    pm_get_xprt_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "BOUND");
+} END_TEST
+
+/* The mask iteration order in the SUT is: LOCKED, CONNECTED,
+ * CONNECTING, CLOSE_WAIT, BOUND, BINDING, CLOSING, CONGESTED.
+ * So when several bits are set the rendered string follows that order. */
+START_TEST(xprt_desc_LOCKED_and_CONNECTED) {
+    char buf[64] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    x->state = (1UL << XPRT_LOCKED) | (1UL << XPRT_CONNECTED);
+    pm_get_xprt_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "LOCKED|CONNECTED");
+} END_TEST
+
+START_TEST(xprt_desc_BOUND_and_CONNECTED_orders_CONNECTED_first) {
+    char buf[64] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    x->state = (1UL << XPRT_BOUND) | (1UL << XPRT_CONNECTED);
+    pm_get_xprt_state_desc(x, buf, sizeof(buf));
+    /* CONNECTED comes before BOUND in the SUT's iteration order. */
+    ck_assert_str_eq(buf, "CONNECTED|BOUND");
+} END_TEST
+
+START_TEST(xprt_desc_all_bits_set_full_pipe_string) {
+    char buf[128] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    x->state = (1UL << XPRT_LOCKED) | (1UL << XPRT_CONNECTED)
+             | (1UL << XPRT_CONNECTING) | (1UL << XPRT_CLOSE_WAIT)
+             | (1UL << XPRT_BOUND) | (1UL << XPRT_BINDING)
+             | (1UL << XPRT_CLOSING) | (1UL << XPRT_CONGESTED);
+    pm_get_xprt_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf,
+        "LOCKED|CONNECTED|CONNECTING|CLOSE_WAIT|"
+        "BOUND|BINDING|CLOSING|CONGESTED");
+} END_TEST
+
+START_TEST(xprt_desc_NULL_xprt_buf_unchanged) {
+    char buf[64] = "PRESERVED";
+    pm_get_xprt_state_desc(NULL, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "PRESERVED");
+} END_TEST
+
+START_TEST(xprt_desc_NULL_buf_no_op) {
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    pm_get_xprt_state_desc(x, NULL, 64);
+} END_TEST
+
+START_TEST(xprt_desc_zero_len_no_op) {
+    char buf[64] = "PRESERVED";
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    pm_get_xprt_state_desc(x, buf, 0);
+    ck_assert_str_eq(buf, "PRESERVED");
+} END_TEST
+
+/* Buffer-truncation: short buffer cuts off mid-render. */
+START_TEST(xprt_desc_short_buffer_first_token_only) {
+    char buf[10] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    x->state = (1UL << XPRT_LOCKED) | (1UL << XPRT_CONNECTED);
+    pm_get_xprt_state_desc(x, buf, sizeof(buf));
+    /* "LOCKED" (6 chars) fits, but "|CONNECTED" (10) needs another 9
+     * after the NUL — short buffer should truncate within. */
+    ck_assert_int_lt(strlen(buf), sizeof(buf));
+    ck_assert_int_eq(strncmp(buf, "LOCKED", 6), 0);
+} END_TEST
+
+/* Parametric: every single-bit setting renders exactly the
+ * matching name. */
+#define XPRT_DESC_SINGLE_BIT(name, bit, expected) \
+    START_TEST(name) { \
+        char buf[64] = {0}; \
+        struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL); \
+        x->state = (1UL << (bit)); \
+        pm_get_xprt_state_desc(x, buf, sizeof(buf)); \
+        ck_assert_str_eq(buf, expected); \
+    } END_TEST
+
+XPRT_DESC_SINGLE_BIT(xprt_desc_p_LOCKED,     XPRT_LOCKED,     "LOCKED")
+XPRT_DESC_SINGLE_BIT(xprt_desc_p_CONNECTED,  XPRT_CONNECTED,  "CONNECTED")
+XPRT_DESC_SINGLE_BIT(xprt_desc_p_CONNECTING, XPRT_CONNECTING, "CONNECTING")
+XPRT_DESC_SINGLE_BIT(xprt_desc_p_CLOSE_WAIT, XPRT_CLOSE_WAIT, "CLOSE_WAIT")
+XPRT_DESC_SINGLE_BIT(xprt_desc_p_BOUND,      XPRT_BOUND,      "BOUND")
+XPRT_DESC_SINGLE_BIT(xprt_desc_p_BINDING,    XPRT_BINDING,    "BINDING")
+XPRT_DESC_SINGLE_BIT(xprt_desc_p_CLOSING,    XPRT_CLOSING,    "CLOSING")
+XPRT_DESC_SINGLE_BIT(xprt_desc_p_CONGESTED,  XPRT_CONGESTED,  "CONGESTED")
+
+/* Bit combinations matrix. The SUT iterates in fixed order so the
+ * output is deterministic. */
+START_TEST(xprt_desc_three_bits_locked_connected_bound) {
+    char buf[64] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    x->state = (1UL << XPRT_LOCKED) | (1UL << XPRT_CONNECTED) | (1UL << XPRT_BOUND);
+    pm_get_xprt_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "LOCKED|CONNECTED|BOUND");
+} END_TEST
+
+START_TEST(xprt_desc_connecting_binding) {
+    char buf[64] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    x->state = (1UL << XPRT_CONNECTING) | (1UL << XPRT_BINDING);
+    pm_get_xprt_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "CONNECTING|BINDING");
+} END_TEST
+
+START_TEST(xprt_desc_closing_close_wait_congested) {
+    char buf[64] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    x->state = (1UL << XPRT_CLOSING) | (1UL << XPRT_CLOSE_WAIT) | (1UL << XPRT_CONGESTED);
+    pm_get_xprt_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "CLOSE_WAIT|CLOSING|CONGESTED");
+} END_TEST
+
+/* Bits OUTSIDE the recognised set are silently dropped. */
+START_TEST(xprt_desc_unknown_bit_ignored) {
+    char buf[64] = {0};
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    x->state = (1UL << XPRT_LOCKED) | (1UL << 30);  /* bit 30 not recognised */
+    pm_get_xprt_state_desc(x, buf, sizeof(buf));
+    ck_assert_str_eq(buf, "LOCKED");
+} END_TEST
+
+/* ============================================================ */
 /* Suite plumbing.                                              */
 /* ============================================================ */
 
@@ -427,6 +670,48 @@ static Suite *pm_state_suite(void)
     tcase_add_test(tccp, connected_fault_false2);
     tcase_add_test(tccp, connected_undefined_false2);
     suite_add_tcase(s, tccp);
+
+    TCase *tcd = tcase_create("path_state_desc");
+    tcase_add_checked_fixture(tcd, setup, teardown);
+    tcase_add_test(tcd, path_desc_INIT_renders_Init);
+    tcase_add_test(tcd, path_desc_NORMAL_renders_Normal);
+    tcase_add_test(tcd, path_desc_UNSTABLE_renders_Unstable);
+    tcase_add_test(tcd, path_desc_FAULT_renders_Fault);
+    tcase_add_test(tcd, path_desc_UNDEFINED_renders_Unknown);
+    tcase_add_test(tcd, path_desc_NULL_xprt_no_op_buf_unchanged);
+    tcase_add_test(tcd, path_desc_NULL_buf_no_op);
+    tcase_add_test(tcd, path_desc_zero_len_no_op);
+    tcase_add_test(tcd, path_desc_negative_len_no_op);
+    tcase_add_test(tcd, path_desc_short_buffer_truncates);
+    tcase_add_test(tcd, path_desc_no_ctx_renders_Unknown);
+    suite_add_tcase(s, tcd);
+
+    TCase *tcx = tcase_create("xprt_state_desc");
+    tcase_add_checked_fixture(tcx, setup, teardown);
+    tcase_add_test(tcx, xprt_desc_no_bits_yields_empty);
+    tcase_add_test(tcx, xprt_desc_LOCKED_only);
+    tcase_add_test(tcx, xprt_desc_CONNECTED_only);
+    tcase_add_test(tcx, xprt_desc_BOUND_only);
+    tcase_add_test(tcx, xprt_desc_LOCKED_and_CONNECTED);
+    tcase_add_test(tcx, xprt_desc_BOUND_and_CONNECTED_orders_CONNECTED_first);
+    tcase_add_test(tcx, xprt_desc_all_bits_set_full_pipe_string);
+    tcase_add_test(tcx, xprt_desc_NULL_xprt_buf_unchanged);
+    tcase_add_test(tcx, xprt_desc_NULL_buf_no_op);
+    tcase_add_test(tcx, xprt_desc_zero_len_no_op);
+    tcase_add_test(tcx, xprt_desc_short_buffer_first_token_only);
+    tcase_add_test(tcx, xprt_desc_p_LOCKED);
+    tcase_add_test(tcx, xprt_desc_p_CONNECTED);
+    tcase_add_test(tcx, xprt_desc_p_CONNECTING);
+    tcase_add_test(tcx, xprt_desc_p_CLOSE_WAIT);
+    tcase_add_test(tcx, xprt_desc_p_BOUND);
+    tcase_add_test(tcx, xprt_desc_p_BINDING);
+    tcase_add_test(tcx, xprt_desc_p_CLOSING);
+    tcase_add_test(tcx, xprt_desc_p_CONGESTED);
+    tcase_add_test(tcx, xprt_desc_three_bits_locked_connected_bound);
+    tcase_add_test(tcx, xprt_desc_connecting_binding);
+    tcase_add_test(tcx, xprt_desc_closing_close_wait_congested);
+    tcase_add_test(tcx, xprt_desc_unknown_bit_ignored);
+    suite_add_tcase(s, tcx);
 
     /* Long-running stress. */
     TCase *tcs = tcase_create("stress");
