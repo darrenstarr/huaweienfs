@@ -116,6 +116,86 @@ START_TEST(ntop_buffer_too_small_truncates_safely) {
 } END_TEST
 
 /* ============================================================ */
+/* IPv6 ntop special-case branches.                             */
+/*                                                              */
+/* The SUT has three branches we hadn't been hitting:           */
+/*   1. ipv6_addr_any → render as "::"                          */
+/*   2. ipv6_addr_v4mapped → render as "::ffff:1.2.3.4"         */
+/*   3. non-zero scope_id → suffix with "%N"                    */
+/* ============================================================ */
+
+START_TEST(ntop_v6_unspecified_renders_double_colon) {
+    char buf[64] = {0};
+    struct sockaddr_in6 a = v6("::", 0);
+    size_t n = esunrpc_rpc_ntop((struct sockaddr *)&a, buf, sizeof(buf));
+    ck_assert_uint_gt(n, 0);
+    ck_assert_str_eq(buf, "::");
+} END_TEST
+
+START_TEST(ntop_v6_v4mapped_renders_compat_form) {
+    char buf[64] = {0};
+    /* ::ffff:1.2.3.4 in v6 hex form is ::ffff:0102:0304. The SUT
+     * detects ipv6_addr_v4mapped and renders the v4 dotted form. */
+    struct sockaddr_in6 a = v6("::ffff:1.2.3.4", 0);
+    size_t n = esunrpc_rpc_ntop((struct sockaddr *)&a, buf, sizeof(buf));
+    ck_assert_uint_gt(n, 0);
+    /* Production renders this as "::ffff:1.2.3.4". */
+    ck_assert_str_eq(buf, "::ffff:1.2.3.4");
+} END_TEST
+
+START_TEST(ntop_v6_link_local_with_scope) {
+    char buf[64] = {0};
+    struct sockaddr_in6 a = v6("fe80::1", 0);
+    a.sin6_scope_id = 5;
+    size_t n = esunrpc_rpc_ntop((struct sockaddr *)&a, buf, sizeof(buf));
+    ck_assert_uint_gt(n, 0);
+    /* RFC 4007: scope ID is suffixed with the SUT's
+     * IPV6_SCOPE_DELIMITER ('%' on Linux) and the numeric ifindex. */
+    ck_assert_ptr_nonnull(strchr(buf, '%'));
+    ck_assert_ptr_nonnull(strstr(buf, "5"));
+} END_TEST
+
+START_TEST(ntop_v6_link_local_zero_scope_no_suffix) {
+    char buf[64] = {0};
+    struct sockaddr_in6 a = v6("fe80::1", 0);
+    a.sin6_scope_id = 0;
+    size_t n = esunrpc_rpc_ntop((struct sockaddr *)&a, buf, sizeof(buf));
+    ck_assert_uint_gt(n, 0);
+    ck_assert_ptr_null(strchr(buf, '%'));
+} END_TEST
+
+#define V6_V4MAPPED_TEST(name, v4) \
+    START_TEST(name) { \
+        char buf[64] = {0}; \
+        struct sockaddr_in6 a = v6("::ffff:" v4, 0); \
+        size_t n = esunrpc_rpc_ntop((struct sockaddr *)&a, buf, sizeof(buf)); \
+        ck_assert_uint_gt(n, 0); \
+        ck_assert_str_eq(buf, "::ffff:" v4); \
+    } END_TEST
+
+V6_V4MAPPED_TEST(ntop_v6_v4mapped_192_0_2_10,  "192.0.2.10")
+V6_V4MAPPED_TEST(ntop_v6_v4mapped_8_8_8_8,     "8.8.8.8")
+V6_V4MAPPED_TEST(ntop_v6_v4mapped_127_0_0_1,   "127.0.0.1")
+
+#define V6_LINK_SCOPE_TEST(name, scope_id) \
+    START_TEST(name) { \
+        char buf[64] = {0}; \
+        struct sockaddr_in6 a = v6("fe80::abcd", 0); \
+        a.sin6_scope_id = (scope_id); \
+        size_t n = esunrpc_rpc_ntop((struct sockaddr *)&a, buf, sizeof(buf)); \
+        ck_assert_uint_gt(n, 0); \
+        char *pct = strchr(buf, '%'); \
+        ck_assert_ptr_nonnull(pct); \
+        unsigned int rendered_scope = 0; \
+        ck_assert_int_eq(sscanf(pct + 1, "%u", &rendered_scope), 1); \
+        ck_assert_uint_eq(rendered_scope, (scope_id)); \
+    } END_TEST
+
+V6_LINK_SCOPE_TEST(ntop_v6_link_local_scope_2,    2)
+V6_LINK_SCOPE_TEST(ntop_v6_link_local_scope_99,   99)
+V6_LINK_SCOPE_TEST(ntop_v6_link_local_scope_max,  4294967290u)
+
+/* ============================================================ */
 /* esunrpc_rpc_pton — string -> sockaddr                         */
 /* ============================================================ */
 
@@ -641,6 +721,21 @@ static Suite *esunrpc_addr_suite(void)
     suite_add_tcase(s, t11);
 
     /* Extended pton coverage. */
+    /* Specialised IPv6 ntop branches: unspecified address (::),
+     * IPv4-mapped IPv6, and addresses with a non-zero scope ID. */
+    TCase *t13 = tcase_create("ntop_v6_special");
+    tcase_add_test(t13, ntop_v6_unspecified_renders_double_colon);
+    tcase_add_test(t13, ntop_v6_v4mapped_renders_compat_form);
+    tcase_add_test(t13, ntop_v6_link_local_with_scope);
+    tcase_add_test(t13, ntop_v6_link_local_zero_scope_no_suffix);
+    tcase_add_test(t13, ntop_v6_v4mapped_192_0_2_10);
+    tcase_add_test(t13, ntop_v6_v4mapped_8_8_8_8);
+    tcase_add_test(t13, ntop_v6_v4mapped_127_0_0_1);
+    tcase_add_test(t13, ntop_v6_link_local_scope_2);
+    tcase_add_test(t13, ntop_v6_link_local_scope_99);
+    tcase_add_test(t13, ntop_v6_link_local_scope_max);
+    suite_add_tcase(s, t13);
+
     TCase *t12 = tcase_create("pton_extended");
     tcase_add_test(t12, pton_v4_extended_a);
     tcase_add_test(t12, pton_v4_extended_b);

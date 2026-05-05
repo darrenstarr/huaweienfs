@@ -18,11 +18,29 @@
 #define IPV6_ADDR_SITELOCAL  0x0040U
 #define IPV6_ADDR_MULTICAST  0x0002U
 
-/* No-op "is link-local" / "is loopback" — the addr.c paths we test
- * never call into these. Provided as inline stubs so the include
- * chain resolves. */
+/* ipv6_addr_type — return the address-type bitfield. Tests reach
+ * the link-local branch when rendering scope ids. We classify the
+ * minimum cases addr.c branches on. Real kernel implementation in
+ * net/ipv6/addrconf.c is hundreds of lines; this is enough for the
+ * tested rendering paths. */
 static inline int ipv6_addr_type(const struct in6_addr *a)
-{ (void)a; return 0; }
+{
+    if (!a) return 0;
+    /* Link-local: fe80::/10 — high byte 0xfe, second byte 0x80..0xbf. */
+    if (a->s6_addr[0] == 0xfe && (a->s6_addr[1] & 0xc0) == 0x80)
+        return IPV6_ADDR_LINKLOCAL;
+    /* Loopback: ::1. */
+    {
+        static const unsigned char loopback[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1};
+        int i, is_lb = 1;
+        for (i = 0; i < 16; i++) if (a->s6_addr[i] != loopback[i]) { is_lb = 0; break; }
+        if (is_lb) return IPV6_ADDR_LOOPBACK;
+    }
+    /* Multicast: ff00::/8. */
+    if (a->s6_addr[0] == 0xff)
+        return IPV6_ADDR_MULTICAST;
+    return 0;
+}
 
 /* Minimal struct net_device — addr.c reads ->ifindex on the
  * scope-id parse branch. Tests never reach it (dev_get_by_name
