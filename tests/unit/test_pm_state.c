@@ -220,6 +220,119 @@ START_TEST(lifecycle_repeated_idempotent_writes) {
 } END_TEST
 
 /* ============================================================ */
+/* Multi-xprt independence — changes to one don't affect others. */
+/* ============================================================ */
+
+START_TEST(multi_xprt_state_independence) {
+    struct rpc_xprt *a = make_xprt_with_state(PM_STATE_NORMAL);
+    struct rpc_xprt *b = make_xprt_with_state(PM_STATE_FAULT);
+    struct rpc_xprt *c = make_xprt_with_state(PM_STATE_INIT);
+    ck_assert_int_eq(pm_get_path_state(a), PM_STATE_NORMAL);
+    ck_assert_int_eq(pm_get_path_state(b), PM_STATE_FAULT);
+    ck_assert_int_eq(pm_get_path_state(c), PM_STATE_INIT);
+    pm_set_path_state(a, PM_STATE_FAULT);
+    ck_assert_int_eq(pm_get_path_state(b), PM_STATE_FAULT);  /* unchanged */
+    ck_assert_int_eq(pm_get_path_state(c), PM_STATE_INIT);   /* unchanged */
+} END_TEST
+
+START_TEST(multi_xprt_concurrent_transitions) {
+    struct rpc_xprt *xs[10];
+    for (int i = 0; i < 10; i++)
+        xs[i] = make_xprt_with_state(PM_STATE_INIT);
+    /* Each xprt independently transitions to NORMAL. */
+    for (int i = 0; i < 10; i++)
+        pm_set_path_state(xs[i], PM_STATE_NORMAL);
+    for (int i = 0; i < 10; i++)
+        ck_assert_int_eq(pm_get_path_state(xs[i]), PM_STATE_NORMAL);
+} END_TEST
+
+/* ============================================================ */
+/* enfs_is_path_connected at every state.                        */
+/* ============================================================ */
+
+#define CONNECTED_TEST(name, state, expected) \
+    START_TEST(name) { \
+        ck_assert_int_eq(enfs_is_path_connected(state), expected); \
+    } END_TEST
+
+CONNECTED_TEST(connected_init_false2,      PM_STATE_INIT,      false)
+CONNECTED_TEST(connected_normal_true2,     PM_STATE_NORMAL,    true)
+CONNECTED_TEST(connected_unstable_true2,   PM_STATE_UNSTABLE,  true)
+CONNECTED_TEST(connected_fault_false2,     PM_STATE_FAULT,     false)
+CONNECTED_TEST(connected_undefined_false2, PM_STATE_UNDEFINED, false)
+
+/* ============================================================ */
+/* Long-running transition sequences (stress).                   */
+/* ============================================================ */
+
+START_TEST(stress_random_transitions_100) {
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    enum enfs_path_state seq[] = {
+        PM_STATE_FAULT, PM_STATE_NORMAL, PM_STATE_UNSTABLE,
+        PM_STATE_NORMAL, PM_STATE_INIT, PM_STATE_NORMAL,
+        PM_STATE_FAULT, PM_STATE_INIT, PM_STATE_UNSTABLE,
+        PM_STATE_NORMAL,
+    };
+    for (int rep = 0; rep < 10; rep++)
+        for (size_t i = 0; i < sizeof(seq)/sizeof(seq[0]); i++) {
+            pm_set_path_state(x, seq[i]);
+            ck_assert_int_eq(pm_get_path_state(x), seq[i]);
+        }
+} END_TEST
+
+START_TEST(stress_alternating_normal_fault_500) {
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_NORMAL);
+    for (int i = 0; i < 500; i++) {
+        pm_set_path_state(x, (i & 1) ? PM_STATE_FAULT : PM_STATE_NORMAL);
+        ck_assert_int_eq(pm_get_path_state(x),
+                         (i & 1) ? PM_STATE_FAULT : PM_STATE_NORMAL);
+    }
+} END_TEST
+
+START_TEST(stress_walk_all_5_states_in_cycle) {
+    struct rpc_xprt *x = make_xprt_with_state(PM_STATE_INIT);
+    enum enfs_path_state cycle[] = {
+        PM_STATE_NORMAL, PM_STATE_UNSTABLE, PM_STATE_FAULT,
+        PM_STATE_INIT, PM_STATE_UNDEFINED,
+    };
+    for (int rep = 0; rep < 50; rep++)
+        for (size_t i = 0; i < 5; i++) {
+            pm_set_path_state(x, cycle[i]);
+            ck_assert_int_eq(pm_get_path_state(x), cycle[i]);
+        }
+} END_TEST
+
+/* ============================================================ */
+/* Many xprts × many transitions.                                */
+/* ============================================================ */
+
+START_TEST(stress_many_xprts_independent_lifecycles) {
+    const int N = 50;
+    struct rpc_xprt *xs[N];
+    for (int i = 0; i < N; i++)
+        xs[i] = make_xprt_with_state(PM_STATE_INIT);
+    /* Push each through INIT → NORMAL → FAULT → NORMAL. */
+    for (int i = 0; i < N; i++) pm_set_path_state(xs[i], PM_STATE_NORMAL);
+    for (int i = 0; i < N; i++) ck_assert_int_eq(pm_get_path_state(xs[i]), PM_STATE_NORMAL);
+    for (int i = 0; i < N; i++) pm_set_path_state(xs[i], PM_STATE_FAULT);
+    for (int i = 0; i < N; i++) ck_assert_int_eq(pm_get_path_state(xs[i]), PM_STATE_FAULT);
+    for (int i = 0; i < N; i++) pm_set_path_state(xs[i], PM_STATE_NORMAL);
+    for (int i = 0; i < N; i++) ck_assert_int_eq(pm_get_path_state(xs[i]), PM_STATE_NORMAL);
+} END_TEST
+
+/* ============================================================ */
+/* get_state on NULL input never crashes (already covered, but   */
+/* exercise it from inside a long run.)                          */
+/* ============================================================ */
+
+START_TEST(stress_NULL_calls_repeated) {
+    for (int i = 0; i < 1000; i++) {
+        ck_assert_int_eq(pm_get_path_state(NULL), PM_STATE_UNDEFINED);
+        pm_set_path_state(NULL, PM_STATE_NORMAL);
+    }
+} END_TEST
+
+/* ============================================================ */
 /* Suite plumbing.                                              */
 /* ============================================================ */
 
@@ -297,6 +410,33 @@ static Suite *pm_state_suite(void)
     tcase_add_test(tcl, lifecycle_normal_unstable_normal_flap);
     tcase_add_test(tcl, lifecycle_repeated_idempotent_writes);
     suite_add_tcase(s, tcl);
+
+    /* Multi-xprt independence. */
+    TCase *tcm = tcase_create("multi_xprt");
+    tcase_add_checked_fixture(tcm, setup, teardown);
+    tcase_add_test(tcm, multi_xprt_state_independence);
+    tcase_add_test(tcm, multi_xprt_concurrent_transitions);
+    suite_add_tcase(s, tcm);
+
+    /* Connected predicate at every state — second pass for redundancy. */
+    TCase *tccp = tcase_create("connected_predicate_redux");
+    tcase_add_checked_fixture(tccp, setup, teardown);
+    tcase_add_test(tccp, connected_init_false2);
+    tcase_add_test(tccp, connected_normal_true2);
+    tcase_add_test(tccp, connected_unstable_true2);
+    tcase_add_test(tccp, connected_fault_false2);
+    tcase_add_test(tccp, connected_undefined_false2);
+    suite_add_tcase(s, tccp);
+
+    /* Long-running stress. */
+    TCase *tcs = tcase_create("stress");
+    tcase_add_checked_fixture(tcs, setup, teardown);
+    tcase_add_test(tcs, stress_random_transitions_100);
+    tcase_add_test(tcs, stress_alternating_normal_fault_500);
+    tcase_add_test(tcs, stress_walk_all_5_states_in_cycle);
+    tcase_add_test(tcs, stress_many_xprts_independent_lifecycles);
+    tcase_add_test(tcs, stress_NULL_calls_repeated);
+    suite_add_tcase(s, tcs);
 
     return s;
 }
