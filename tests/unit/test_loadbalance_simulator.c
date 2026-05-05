@@ -556,6 +556,63 @@ START_TEST(small_workload_10_at_N_5)    { run_perfect_distribution(5,    10); } 
 START_TEST(medium_workload_1k_at_N_5)   { run_perfect_distribution(5,  1000); } END_TEST
 START_TEST(large_workload_100k_at_N_5)  { run_perfect_distribution(5,100000); } END_TEST
 
+/* ============================================================ */
+/* More N values for perfect distribution.                       */
+/* ============================================================ */
+
+START_TEST(perfect_dist_N_9)   { run_perfect_distribution(9,    9000); } END_TEST
+START_TEST(perfect_dist_N_10)  { run_perfect_distribution(10,  10000); } END_TEST
+START_TEST(perfect_dist_N_14)  { run_perfect_distribution(14,  14000); } END_TEST
+START_TEST(perfect_dist_N_18)  { run_perfect_distribution(18,  18000); } END_TEST
+START_TEST(perfect_dist_N_20)  { run_perfect_distribution(20,  20000); } END_TEST
+START_TEST(perfect_dist_N_22)  { run_perfect_distribution(22,  22000); } END_TEST
+START_TEST(perfect_dist_N_26)  { run_perfect_distribution(26,  26000); } END_TEST
+START_TEST(perfect_dist_N_36)  { run_perfect_distribution(36,  36000); } END_TEST
+START_TEST(perfect_dist_N_40)  { run_perfect_distribution(40,  40000); } END_TEST
+START_TEST(perfect_dist_N_50)  { run_perfect_distribution(50,  50000); } END_TEST
+START_TEST(perfect_dist_N_56)  { run_perfect_distribution(56,  56000); } END_TEST
+START_TEST(perfect_dist_N_72)  { run_perfect_distribution(72,  72000); } END_TEST
+START_TEST(perfect_dist_N_96)  { run_perfect_distribution(96,  96000); } END_TEST
+START_TEST(perfect_dist_N_100) { run_perfect_distribution(100,10000); } END_TEST
+START_TEST(perfect_dist_N_200) { run_perfect_distribution(200,10000); } END_TEST
+START_TEST(perfect_dist_N_256) { run_perfect_distribution(256,12800); } END_TEST
+
+/* ============================================================ */
+/* More single-failure positions at N=16.                       */
+/* ============================================================ */
+
+#define FAIL_POS_16(name, idx) \
+    START_TEST(name) { unsigned int d[]={idx}; run_with_K_down(16,1,d, 15000); } END_TEST
+
+FAIL_POS_16(fail_pos_1_of_16,  1)
+FAIL_POS_16(fail_pos_2_of_16,  2)
+FAIL_POS_16(fail_pos_3_of_16,  3)
+FAIL_POS_16(fail_pos_4_of_16,  4)
+FAIL_POS_16(fail_pos_5_of_16,  5)
+FAIL_POS_16(fail_pos_6_of_16,  6)
+FAIL_POS_16(fail_pos_7_of_16,  7)
+FAIL_POS_16(fail_pos_8_of_16,  8)
+FAIL_POS_16(fail_pos_9_of_16,  9)
+FAIL_POS_16(fail_pos_10_of_16, 10)
+FAIL_POS_16(fail_pos_11_of_16, 11)
+FAIL_POS_16(fail_pos_12_of_16, 12)
+FAIL_POS_16(fail_pos_13_of_16, 13)
+FAIL_POS_16(fail_pos_14_of_16, 14)
+FAIL_POS_16(fail_pos_15_of_16, 15)
+
+/* ============================================================ */
+/* Many N values for native-down behavior.                       */
+/* ============================================================ */
+
+START_TEST(native_down_N_3)   { run_native_link_main_skipped(3,   2000); } END_TEST
+START_TEST(native_down_N_5)   { run_native_link_main_skipped(5,   4000); } END_TEST
+START_TEST(native_down_N_6)   { run_native_link_main_skipped(6,   5000); } END_TEST
+START_TEST(native_down_N_10)  { run_native_link_main_skipped(10,  9000); } END_TEST
+START_TEST(native_down_N_12)  { run_native_link_main_skipped(12, 11000); } END_TEST
+START_TEST(native_down_N_24)  { run_native_link_main_skipped(24, 23000); } END_TEST
+START_TEST(native_down_N_48)  { run_native_link_main_skipped(48, 47000); } END_TEST
+START_TEST(native_down_N_64)  { run_native_link_main_skipped(64, 63000); } END_TEST
+
 /* ================================================================ */
 /* Suite plumbing.                                                  */
 /* ================================================================ */
@@ -652,6 +709,60 @@ static Suite *loadbalance_suite(void)
     tcase_add_test(tc_w, medium_workload_1k_at_N_5);
     tcase_add_test(tc_w, large_workload_100k_at_N_5);
     suite_add_tcase(s, tc_w);
+
+    /* More N values for perfect distribution. */
+    TCase *tc_n2 = tcase_create("perfect_distribution_more_N");
+    tcase_add_checked_fixture(tc_n2, setup, teardown);
+    tcase_add_test(tc_n2, perfect_dist_N_9);
+    tcase_add_test(tc_n2, perfect_dist_N_10);
+    tcase_add_test(tc_n2, perfect_dist_N_14);
+    tcase_add_test(tc_n2, perfect_dist_N_18);
+    tcase_add_test(tc_n2, perfect_dist_N_20);
+    tcase_add_test(tc_n2, perfect_dist_N_22);
+    tcase_add_test(tc_n2, perfect_dist_N_26);
+    tcase_add_test(tc_n2, perfect_dist_N_36);
+    tcase_add_test(tc_n2, perfect_dist_N_40);
+    tcase_add_test(tc_n2, perfect_dist_N_50);
+    tcase_add_test(tc_n2, perfect_dist_N_56);
+    tcase_add_test(tc_n2, perfect_dist_N_72);
+    tcase_add_test(tc_n2, perfect_dist_N_96);
+    tcase_add_test(tc_n2, perfect_dist_N_100);
+    tcase_add_test(tc_n2, perfect_dist_N_200);
+    tcase_add_test(tc_n2, perfect_dist_N_256);
+    suite_add_tcase(s, tc_n2);
+
+    /* All single-failure positions at N=16. */
+    TCase *tc_f16 = tcase_create("single_failure_at_every_position_N16");
+    tcase_add_checked_fixture(tc_f16, setup, teardown);
+    tcase_add_test(tc_f16, fail_pos_1_of_16);
+    tcase_add_test(tc_f16, fail_pos_2_of_16);
+    tcase_add_test(tc_f16, fail_pos_3_of_16);
+    tcase_add_test(tc_f16, fail_pos_4_of_16);
+    tcase_add_test(tc_f16, fail_pos_5_of_16);
+    tcase_add_test(tc_f16, fail_pos_6_of_16);
+    tcase_add_test(tc_f16, fail_pos_7_of_16);
+    tcase_add_test(tc_f16, fail_pos_8_of_16);
+    tcase_add_test(tc_f16, fail_pos_9_of_16);
+    tcase_add_test(tc_f16, fail_pos_10_of_16);
+    tcase_add_test(tc_f16, fail_pos_11_of_16);
+    tcase_add_test(tc_f16, fail_pos_12_of_16);
+    tcase_add_test(tc_f16, fail_pos_13_of_16);
+    tcase_add_test(tc_f16, fail_pos_14_of_16);
+    tcase_add_test(tc_f16, fail_pos_15_of_16);
+    suite_add_tcase(s, tc_f16);
+
+    /* Native-link-down at more N values. */
+    TCase *tc_nd2 = tcase_create("native_link_down_more_N");
+    tcase_add_checked_fixture(tc_nd2, setup, teardown);
+    tcase_add_test(tc_nd2, native_down_N_3);
+    tcase_add_test(tc_nd2, native_down_N_5);
+    tcase_add_test(tc_nd2, native_down_N_6);
+    tcase_add_test(tc_nd2, native_down_N_10);
+    tcase_add_test(tc_nd2, native_down_N_12);
+    tcase_add_test(tc_nd2, native_down_N_24);
+    tcase_add_test(tc_nd2, native_down_N_48);
+    tcase_add_test(tc_nd2, native_down_N_64);
+    suite_add_tcase(s, tc_nd2);
 
     return s;
 }
