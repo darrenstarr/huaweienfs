@@ -125,18 +125,29 @@ STUBS_test_enfs_multipath_parse    := $(STUBS_DIR)/kernel_stubs.c \
 all: $(addprefix $(BUILD_DIR)/, $(TESTS))
 
 # `check` is the conventional GNU make name for "build + run tests".
+# Sets CK_XML_LOG_FILE per test so libcheck's SRunner emits a JUnit-
+# style XML report (consumed by tests/unit/check_runner.h's main()).
+# CI workflows pick those up as artifacts and render them via the
+# test-reporter action.
 check: all
 	@set -e; \
+	mkdir -p $(BUILD_DIR)/junit; \
 	failed=0; \
 	for t in $(TESTS); do \
 	    echo "=== running $$t ==="; \
+	    CK_XML_LOG_FILE=$(BUILD_DIR)/junit/$$t.xml \
+	    CK_TAP_LOG_FILE=$(BUILD_DIR)/junit/$$t.tap \
 	    $(BUILD_DIR)/$$t || failed=$$((failed+1)); \
 	done; \
 	if [ $$failed -gt 0 ]; then \
 	    echo "FAIL: $$failed test binary(ies) reported failures"; \
+	    echo "JUnit XML reports under $(BUILD_DIR)/junit/"; \
 	    exit 1; \
 	fi; \
-	echo "OK: all $(words $(TESTS)) test binary(ies) passed"
+	total=$$(grep -h 'failures="' $(BUILD_DIR)/junit/*.xml 2>/dev/null \
+	    | sed -E 's/.*tests="([0-9]+)".*/\1/' | paste -sd+ - | bc); \
+	echo "OK: all $(words $(TESTS)) test binary(ies) passed ($$total individual cases)"; \
+	echo "JUnit XML reports under $(BUILD_DIR)/junit/"
 
 # Headers fetch. Idempotent — script no-ops on cache hit.
 fetch-headers: $(HEADERS_DIR)/.fetched

@@ -314,12 +314,5 @@ static Suite *loadbalance_suite(void)
     return s;
 }
 
-int main(void)
-{
-    SRunner *sr = srunner_create(loadbalance_suite());
-    srunner_set_log(sr, NULL);
-    srunner_run_all(sr, CK_VERBOSE);
-    int failed = srunner_ntests_failed(sr);
-    srunner_free(sr);
-    return failed == 0 ? 0 : 1;
-}
+#define CHECK_RUNNER_SUITE  loadbalance_suite
+#include "check_runner.h"

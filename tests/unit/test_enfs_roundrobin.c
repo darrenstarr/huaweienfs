@@ -904,16 +904,7 @@ static Suite *roundrobin_suite(void)
     return s;
 }
 
-int main(void)
-{
-    Suite   *s  = roundrobin_suite();
-    SRunner *sr = srunner_create(s);
-
-    /* CK_VERBOSE prints per-test outcome. CI parses the trailing
-     * pass/fail count from stdout. */
-    srunner_run_all(sr, CK_VERBOSE);
-
-    int failed = srunner_ntests_failed(sr);
-    srunner_free(sr);
-    return failed == 0 ? 0 : 1;
-}
+/* Common runner: set CK_XML_LOG_FILE in the environment for JUnit XML;
+ * see tests/unit/check_runner.h. */
+#define CHECK_RUNNER_SUITE  roundrobin_suite
+#include "check_runner.h"

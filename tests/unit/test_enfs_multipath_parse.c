@@ -300,12 +300,5 @@ static Suite *parse_suite(void)
     return s;
 }
 
-int main(void)
-{
-    Suite   *s  = parse_suite();
-    SRunner *sr = srunner_create(s);
-    srunner_run_all(sr, CK_VERBOSE);
-    int failed = srunner_ntests_failed(sr);
-    srunner_free(sr);
-    return failed == 0 ? 0 : 1;
-}
+#define CHECK_RUNNER_SUITE  parse_suite
+#include "check_runner.h"
