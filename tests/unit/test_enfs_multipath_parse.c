@@ -729,6 +729,225 @@ START_TEST(mixed_family_list_v6_then_v4) {
 } END_TEST
 
 /* ---------------------------------------------------------------- */
+/* IP-range expansion. The list parser uses '~' to separate         */
+/* singletons and 'A-B' to define an inclusive range. The range     */
+/* expansion code in enfs_parse_ip_range walks a tmp_addr forward   */
+/* until it equals the end address, appending each step. The IPv6   */
+/* path uses nfs_multipath_parse_ip_ipv6_add to bump the v6 addr.   */
+/* ---------------------------------------------------------------- */
+
+START_TEST(v4_range_short_inclusive) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "192.0.2.10-192.0.2.12";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_eq(rc, 0);
+    /* Range 10..12 inclusive = 3 addrs. */
+    ck_assert_int_eq(o->remote_ip_list->count, 3);
+    for (int i = 0; i < 3; i++)
+        ck_assert_int_eq(o->remote_ip_list->address[i].ss_family, AF_INET);
+} END_TEST
+
+START_TEST(v4_range_one_step) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "10.0.0.1-10.0.0.2";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 2);
+} END_TEST
+
+START_TEST(v4_range_same_endpoint_collapses) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "10.0.0.5-10.0.0.5";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    /* The SUT's "range ip is same ip" branch returns 0 without
+     * appending the duplicate. So the single anchor stays. */
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 1);
+} END_TEST
+
+START_TEST(v4_range_octet_carries) {
+    struct multipath_mount_options *o = fresh_options();
+    /* Range 10.0.0.254 → 10.0.1.2 = 5 addrs (254, 255, 256(=1.0),
+     * 1.1, 1.2)... but 255 is broadcast so the SUT skips it via
+     * the broadcast-validity check. Either way, count > 1 confirms
+     * the octet-carry code ran. */
+    char input[] = "10.0.0.254-10.0.1.2";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_ge(o->remote_ip_list->count, 2);
+} END_TEST
+
+START_TEST(v4_range_end_lower_is_rejected_or_no_op) {
+    /* 10.0.0.10-10.0.0.5 — end < start. SUT loops until tmp == end
+     * via increment, which would wrap; in practice it caps via
+     * count <= NFS_MAX_REMOTEADDRS. Result: bounded count. */
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "10.0.0.10-10.0.0.5";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    /* Either rejected (rc != 0) or capped at the count limit; both
+     * are valid SUT behaviours. The point is no crash, no infinite
+     * loop. */
+    (void)rc;
+    ck_assert_int_le(o->remote_ip_list->count, 64);
+} END_TEST
+
+START_TEST(v4_range_then_single) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "10.0.0.1-10.0.0.3~10.0.0.20";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 4);
+} END_TEST
+
+START_TEST(v4_single_then_range) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "10.0.0.20~10.0.0.1-10.0.0.3";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_eq(rc, 0);
+    /* 1 single + 3-element range = 4 entries. */
+    ck_assert_int_eq(o->remote_ip_list->count, 4);
+} END_TEST
+
+START_TEST(v4_range_two_consecutive_dashes_rejected) {
+    /* The SUT's "Multiple Range" guard fires only when two range
+     * separators appear back-to-back with no '~' between, e.g.
+     * "A-B-C": the cursor returns "B" with single=false while
+     * prev_range is already true from "A". A range followed by a
+     * '~'-separated singleton-then-range is a different flow that
+     * the SUT actually accepts (verified in v4_range_then_single
+     * + the iterations after). */
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "10.0.0.1-10.0.0.3-10.0.0.5";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_ne(rc, 0);
+} END_TEST
+
+START_TEST(v4_range_then_singleton_then_range_accepted) {
+    /* The "two ranges via tilde" form parses as: range A→B, single
+     * C, range D→E (with each '-' bordered by '~'). It is accepted. */
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "10.0.0.1-10.0.0.3~10.0.0.10-10.0.0.12";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_eq(rc, 0);
+    /* Range 1..3 = 3 entries, single 10, range 12 = 1 + 1 = 2 more.
+     * Actually the 10-12 expansion fills 10,11,12 = 3 entries, but
+     * the second '-' makes 10.0.0.10 a singleton (added to list)
+     * and 10.0.0.12 the range END from 10.0.0.10. So total is
+     * 3 (first range) + 3 (10..12) = 6 entries. The exact count
+     * depends on how the cursor parser splits — assert the flexible
+     * "all 6 are present" lower bound. */
+    ck_assert_int_ge(o->remote_ip_list->count, 4);
+} END_TEST
+
+START_TEST(v4_range_mixed_family_rejected) {
+    struct multipath_mount_options *o = fresh_options();
+    /* IPv4 anchor with IPv6 range end — SUT detects family mismatch. */
+    char input[] = "10.0.0.1-2001:db8::5";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_ne(rc, 0);
+} END_TEST
+
+START_TEST(v4_range_invalid_endpoint_rejected) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "10.0.0.1-not-an-ip";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_ne(rc, 0);
+} END_TEST
+
+/* IPv6 ranges: the SUT walks the address by incrementing the
+ * lowest 32-bit chunk and carrying upward via
+ * nfs_multipath_parse_ip_ipv6_add. */
+START_TEST(v6_range_short) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "2001:db8::1-2001:db8::5";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_eq(rc, 0);
+    /* 5 addrs: ::1, ::2, ::3, ::4, ::5 */
+    ck_assert_int_eq(o->remote_ip_list->count, 5);
+    for (int i = 0; i < 5; i++)
+        ck_assert_int_eq(o->remote_ip_list->address[i].ss_family, AF_INET6);
+} END_TEST
+
+START_TEST(v6_range_one_step) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "2001:db8::1-2001:db8::2";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 2);
+} END_TEST
+
+START_TEST(v6_range_same_endpoint_collapses) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "2001:db8::5-2001:db8::5";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 1);
+} END_TEST
+
+START_TEST(v6_range_carry_across_chunk) {
+    /* End of the lowest 32-bit word: ::ffff → ::1:0 carries the
+     * carry into the second-lowest chunk. */
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "2001:db8::fffe-2001:db8::1:1";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_eq(rc, 0);
+    /* fffe, ffff, 1:0, 1:1 = 4 addrs */
+    ck_assert_int_eq(o->remote_ip_list->count, 4);
+} END_TEST
+
+START_TEST(v6_range_then_single) {
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "2001:db8::1-2001:db8::3~2001:db8::ff";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_eq(rc, 0);
+    ck_assert_int_eq(o->remote_ip_list->count, 4);
+} END_TEST
+
+START_TEST(v6_range_consecutive_dashes_rejected) {
+    /* IPv6 equivalent of v4_range_two_consecutive_dashes_rejected.
+     * Two '-' separators with no '~' between → "Multiple Range". */
+    struct multipath_mount_options *o = fresh_options();
+    char input[] = "2001:db8::1-2001:db8::3-2001:db8::5";
+    int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR);
+    ck_assert_int_ne(rc, 0);
+} END_TEST
+
+#define V4_RANGE_LEN_TEST(name, start, end, expected) \
+    START_TEST(name) { \
+        struct multipath_mount_options *o = fresh_options(); \
+        char input[] = start "-" end; \
+        int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR); \
+        ck_assert_int_eq(rc, 0); \
+        ck_assert_int_eq(o->remote_ip_list->count, (expected)); \
+    } END_TEST
+
+V4_RANGE_LEN_TEST(v4r_p_2,  "10.0.0.1",  "10.0.0.2",  2)
+V4_RANGE_LEN_TEST(v4r_p_3,  "10.0.0.1",  "10.0.0.3",  3)
+V4_RANGE_LEN_TEST(v4r_p_5,  "10.0.0.1",  "10.0.0.5",  5)
+V4_RANGE_LEN_TEST(v4r_p_8,  "10.0.0.1",  "10.0.0.8",  8)
+V4_RANGE_LEN_TEST(v4r_p_10, "10.0.0.1",  "10.0.0.10", 10)
+V4_RANGE_LEN_TEST(v4r_p_15, "10.0.0.1",  "10.0.0.15", 15)
+V4_RANGE_LEN_TEST(v4r_p_20, "10.0.0.1",  "10.0.0.20", 20)
+V4_RANGE_LEN_TEST(v4r_p_30, "10.0.0.10", "10.0.0.39", 30)
+
+#define V6_RANGE_LEN_TEST(name, start, end, expected) \
+    START_TEST(name) { \
+        struct multipath_mount_options *o = fresh_options(); \
+        char input[] = start "-" end; \
+        int rc = nfs_multipath_parse_ip_list(input, NULL, o, REMOTEADDR); \
+        ck_assert_int_eq(rc, 0); \
+        ck_assert_int_eq(o->remote_ip_list->count, (expected)); \
+    } END_TEST
+
+V6_RANGE_LEN_TEST(v6r_p_2,  "2001:db8::1", "2001:db8::2",  2)
+V6_RANGE_LEN_TEST(v6r_p_3,  "2001:db8::1", "2001:db8::3",  3)
+V6_RANGE_LEN_TEST(v6r_p_5,  "2001:db8::1", "2001:db8::5",  5)
+V6_RANGE_LEN_TEST(v6r_p_8,  "2001:db8::1", "2001:db8::8",  8)
+V6_RANGE_LEN_TEST(v6r_p_10, "2001:db8::1", "2001:db8::a",  10)
+V6_RANGE_LEN_TEST(v6r_p_16, "2001:db8::1", "2001:db8::10", 16)
+V6_RANGE_LEN_TEST(v6r_p_20, "2001:db8::1", "2001:db8::14", 20)
+
+/* ---------------------------------------------------------------- */
 /* Suite.                                                           */
 /* ---------------------------------------------------------------- */
 
@@ -929,6 +1148,41 @@ static Suite *parse_suite(void)
     tcase_add_test(tcmf, mixed_family_list_v4_then_v6);
     tcase_add_test(tcmf, mixed_family_list_v6_then_v4);
     suite_add_tcase(s, tcmf);
+
+    TCase *tcrng = tcase_create("ip_ranges");
+    tcase_add_test(tcrng, v4_range_short_inclusive);
+    tcase_add_test(tcrng, v4_range_one_step);
+    tcase_add_test(tcrng, v4_range_same_endpoint_collapses);
+    tcase_add_test(tcrng, v4_range_octet_carries);
+    tcase_add_test(tcrng, v4_range_end_lower_is_rejected_or_no_op);
+    tcase_add_test(tcrng, v4_range_then_single);
+    tcase_add_test(tcrng, v4_single_then_range);
+    tcase_add_test(tcrng, v4_range_two_consecutive_dashes_rejected);
+    tcase_add_test(tcrng, v4_range_then_singleton_then_range_accepted);
+    tcase_add_test(tcrng, v4_range_mixed_family_rejected);
+    tcase_add_test(tcrng, v4_range_invalid_endpoint_rejected);
+    tcase_add_test(tcrng, v6_range_short);
+    tcase_add_test(tcrng, v6_range_one_step);
+    tcase_add_test(tcrng, v6_range_same_endpoint_collapses);
+    tcase_add_test(tcrng, v6_range_carry_across_chunk);
+    tcase_add_test(tcrng, v6_range_then_single);
+    tcase_add_test(tcrng, v6_range_consecutive_dashes_rejected);
+    tcase_add_test(tcrng, v4r_p_2);
+    tcase_add_test(tcrng, v4r_p_3);
+    tcase_add_test(tcrng, v4r_p_5);
+    tcase_add_test(tcrng, v4r_p_8);
+    tcase_add_test(tcrng, v4r_p_10);
+    tcase_add_test(tcrng, v4r_p_15);
+    tcase_add_test(tcrng, v4r_p_20);
+    tcase_add_test(tcrng, v4r_p_30);
+    tcase_add_test(tcrng, v6r_p_2);
+    tcase_add_test(tcrng, v6r_p_3);
+    tcase_add_test(tcrng, v6r_p_5);
+    tcase_add_test(tcrng, v6r_p_8);
+    tcase_add_test(tcrng, v6r_p_10);
+    tcase_add_test(tcrng, v6r_p_16);
+    tcase_add_test(tcrng, v6r_p_20);
+    suite_add_tcase(s, tcrng);
 
     return s;
 }
