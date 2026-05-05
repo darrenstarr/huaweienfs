@@ -115,14 +115,39 @@ fs/nfs/nfsv3-y := \
 # Re-add them once the corresponding symbols are exported (would need
 # additional patches to fs/nfs/nfsroot or to vendor/import nfslocalio).
 
+# ---------------------------------------------------------------------
+# nfsv4.ko — NFSv4/4.1/4.2 client. Rebuilt against our patched
+# sunrpc.ko + nfs.ko so symbol CRCs line up; without this the stock
+# nfsv4 module fails to load with "disagrees about version of symbol"
+# errors against rpcauth_create, xdr_stream_pos, nfs_alloc_inode, etc.
+#
+# Mirrors the stock fs/nfs/Makefile nfsv4-y line. We turn on V4_1 and
+# V4_2 (pnfs.o, pnfs_dev.o, pnfs_nfs.o for sessions; nfs42proc.o,
+# nfs42xattr.o for v4.2 ops). nfs42xdr.c is #included from nfs4xdr.c
+# so it does NOT appear here as a separate .o. Ditto nfs40client/proc
+# which are #included from nfs4client/proc.c.
+#
+# CONFIG_NFS_USE_LEGACY_DNS is intentionally off (the in-tree default);
+# we therefore do not pull in cache_lib.o for v4.
+# ---------------------------------------------------------------------
+obj-m += fs/nfs/nfsv4.o
+fs/nfs/nfsv4-y := \
+	fs/nfs/nfs4proc.o fs/nfs/nfs4xdr.o fs/nfs/nfs4state.o \
+	fs/nfs/nfs4renewd.o fs/nfs/nfs4super.o fs/nfs/nfs4file.o \
+	fs/nfs/delegation.o fs/nfs/nfs4idmap.o \
+	fs/nfs/callback.o fs/nfs/callback_xdr.o fs/nfs/callback_proc.o \
+	fs/nfs/nfs4namespace.o fs/nfs/nfs4getroot.o fs/nfs/nfs4client.o \
+	fs/nfs/nfs4session.o fs/nfs/dns_resolve.o fs/nfs/nfs4trace.o \
+	fs/nfs/nfs4sysctl.o \
+	fs/nfs/pnfs.o fs/nfs/pnfs_dev.o fs/nfs/pnfs_nfs.o \
+	fs/nfs/nfs40client.o fs/nfs/nfs40proc.o \
+	fs/nfs/nfs42proc.o fs/nfs/nfs42xattr.o
+
 # Per the in-tree Makefile, fs/nfs/nfstrace.c needs an -I to the dir
 # holding nfstrace.h so the kernel's trace-event mechanism finds the
 # event-defining header. In the in-tree build that's `CFLAGS_nfstrace.o
 # += -I$(src)` evaluated in fs/nfs/Makefile (where $(src) is fs/nfs/).
 # Our top-level Kbuild sees $(src) = src/, so spell out the path.
-# Also flag the same for nfs4trace.o (NFSv4 has its own trace header,
-# even though we don't currently build it as an object — preserved for
-# future when we add NFSv4 multipath).
 CFLAGS_fs/nfs/nfstrace.o += -I$(src)/fs/nfs
 CFLAGS_fs/nfs/nfs4trace.o += -I$(src)/fs/nfs
 

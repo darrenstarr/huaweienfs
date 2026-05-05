@@ -4,7 +4,7 @@
 # (or by debian/rules at package-build time) using the version from
 # debian/changelog.
 #
-# This DKMS module produces SIX kernel objects that together replace
+# This DKMS module produces SEVEN kernel objects that together replace
 # the host's in-tree NFS client stack:
 #
 #   net/sunrpc/sunrpc.ko    stock SunRPC + sunrpc_enfs_adapter.o
@@ -12,6 +12,9 @@
 #   fs/lockd/lockd.ko       rebuilt against our patched sunrpc CRCs
 #   fs/nfs/nfs.ko           stock NFS client + enfs_adapter.o
 #   fs/nfs/nfsv3.ko         NFSv3 procedure table + enfs EXTEND op
+#   fs/nfs/nfsv4.ko         NFSv4/4.1/4.2 client (rebuilt for CRC alignment;
+#                           required for `mount -o vers=4.x` against the
+#                           DKMS-replaced sunrpc/nfs)
 #   fs/nfs/enfs/enfs.ko     the new multipath module
 #
 # DKMS installs them under /lib/modules/$kernelver/updates/, which
@@ -59,9 +62,13 @@ BUILT_MODULE_NAME[4]="nfsv3"
 BUILT_MODULE_LOCATION[4]="src/fs/nfs"
 DEST_MODULE_LOCATION[4]="/updates"
 
-BUILT_MODULE_NAME[5]="enfs"
-BUILT_MODULE_LOCATION[5]="src/fs/nfs/enfs"
+BUILT_MODULE_NAME[5]="nfsv4"
+BUILT_MODULE_LOCATION[5]="src/fs/nfs"
 DEST_MODULE_LOCATION[5]="/updates"
+
+BUILT_MODULE_NAME[6]="enfs"
+BUILT_MODULE_LOCATION[6]="src/fs/nfs/enfs"
+DEST_MODULE_LOCATION[6]="/updates"
 
 # Rebuild on every kernel update.
 AUTOINSTALL="yes"

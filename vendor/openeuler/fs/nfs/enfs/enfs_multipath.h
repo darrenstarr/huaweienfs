@@ -12,6 +12,7 @@
 
 int enfs_multipath_init(void);
 void enfs_multipath_exit(void);
+bool enfs_v4_rr_enabled(void);
 void enfs_xprt_ippair_create(struct xprt_create *xprtargs,
 			     struct rpc_clnt *clnt, void *data);
 int enfs_config_xprt_create_args(struct xprt_create *xprtargs,

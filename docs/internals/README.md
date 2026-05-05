@@ -38,5 +38,19 @@ bash scripts/fetch-vendor-ubuntu.sh ubuntu-7.0
 9. [Compat shims](./09-compat-shims.md) — what
    `compat/enfs_compat.h` papers over and why.
 10. *(reserved — live remount, `/proc/enfs/`, DNS rebind worker)*
+11. [Real-world lab testing procedure](./11-real-world-lab-testing.md) —
+    the on-iron load-sharing validation against a high-bandwidth
+    NFS storage cluster.
+12. [Performance tuning — DPC vs enfs](./12-perf-tuning.md) —
+    baseline measurements, tier-by-tier tuning experiments, and
+    where the bottlenecks actually live.
+13. [NFS-over-RDMA and the future of client-side load sharing](./13-rdma-and-load-sharing.md) —
+    forward-looking analysis of what RDMA + NFSv4.1 sessions
+    would change about enfs's role.
+14. [NFSv4.1 multipath integrity & block-size characterisation](./14-blocksize-and-integrity.md) —
+    cross-host integrity verification of an experimental
+    `enfs_v4_rr` patch + single-stream + parallel sweeps; the
+    headline finding that v4.1 sessions deliver 6–8× single-stream
+    reads vs enfs+v3+RR with no enfs work involved.
 
 Chapters 6 and 10 are placeholders for follow-up work.

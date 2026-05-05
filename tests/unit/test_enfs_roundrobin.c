@@ -77,6 +77,7 @@ const struct rpc_xprt_iter_ops *enfs_xprt_singular_ops(void);
 /* ---------------------------------------------------------------- */
 extern int32_t stub_multipath_state;
 extern int32_t stub_native_link_io_status;
+extern bool    stub_v4_rr_enabled;
 extern int     stub_set_singular_calls;
 extern int     stub_set_roundrobin_calls;
 
@@ -342,6 +343,47 @@ START_TEST(set_policy_v4_picks_singular_ops)
     ck_assert_ptr_eq(xps->xps_iter_ops, enfs_xprt_singular_ops());
     ck_assert(enfs_is_singularr_route(&clnt));
     ck_assert(!enfs_is_rr_route(&clnt));
+}
+END_TEST
+
+/* enfs_v4_rr=1 lifts the v4-forces-singular gate: a v4 client with
+ * cl_enfs=1 must get round-robin ops, just like v3. Locks the new
+ * behaviour added for the v4.1 multipath integrity work. */
+START_TEST(set_policy_v4_with_v4_rr_picks_roundrobin_ops)
+{
+    stub_v4_rr_enabled = true;
+
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *a = make_xprt(0, true, PM_STATE_NORMAL);
+    xps_add(xps, a);
+
+    struct rpc_clnt clnt = { .cl_enfs = 1, .cl_vers = 4 };
+    clnt.cl_xpi.xpi_xpswitch = xps;
+
+    int ret = enfs_lb_set_policy(&clnt, NULL);
+    ck_assert_int_eq(ret, 0);
+    ck_assert_ptr_eq(xps->xps_iter_ops, enfs_xprt_rr_ops());
+    ck_assert(enfs_is_rr_route(&clnt));
+    ck_assert(!enfs_is_singularr_route(&clnt));
+}
+END_TEST
+
+/* enfs_v4_rr=0 (default): v4 still gets singular, v3 still gets RR.
+ * Belt-and-braces against accidentally flipping v3 behaviour. */
+START_TEST(set_policy_v3_with_v4_rr_off_still_picks_roundrobin)
+{
+    stub_v4_rr_enabled = false;
+
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *a = make_xprt(0, true, PM_STATE_NORMAL);
+    xps_add(xps, a);
+
+    struct rpc_clnt clnt = { .cl_enfs = 1, .cl_vers = 3 };
+    clnt.cl_xpi.xpi_xpswitch = xps;
+
+    int ret = enfs_lb_set_policy(&clnt, NULL);
+    ck_assert_int_eq(ret, 0);
+    ck_assert_ptr_eq(xps->xps_iter_ops, enfs_xprt_rr_ops());
 }
 END_TEST
 
@@ -853,6 +895,8 @@ static Suite *roundrobin_suite(void)
     tcase_add_test(tc_policy, revert_policy_skipped_when_not_enfs);
     tcase_add_test(tc_policy, set_policy_v3_picks_roundrobin_ops);
     tcase_add_test(tc_policy, set_policy_v4_picks_singular_ops);
+    tcase_add_test(tc_policy, set_policy_v4_with_v4_rr_picks_roundrobin_ops);
+    tcase_add_test(tc_policy, set_policy_v3_with_v4_rr_off_still_picks_roundrobin);
     tcase_add_test(tc_policy, set_policy_empty_xps_skips_iter_ops_set);
     tcase_add_test(tc_policy, is_rr_route_null_ops_returns_false);
     tcase_add_test(tc_policy, is_singular_route_null_ops_returns_false);
