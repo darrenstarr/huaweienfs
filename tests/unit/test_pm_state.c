@@ -576,6 +576,82 @@ START_TEST(xprt_desc_unknown_bit_ignored) {
 } END_TEST
 
 /* ============================================================ */
+/* pm_set_path_state diagnostic-print path coverage. The SUT     */
+/* prints the source/dest IPs on each state change. Trigger      */
+/* both the IPv4 and IPv6 sockaddr_ip_to_str branches so the    */
+/* gcov execution count for those lines is non-zero.             */
+/* ============================================================ */
+
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+static struct rpc_xprt *make_xprt_with_v4_addr(enum enfs_path_state state,
+                                                const char *peer)
+{
+    struct rpc_xprt *x = make_xprt_with_state(state);
+    struct sockaddr_in *sin = (struct sockaddr_in *)&x->addr;
+    sin->sin_family = AF_INET;
+    inet_pton(AF_INET, peer, &sin->sin_addr);
+    return x;
+}
+
+static struct rpc_xprt *make_xprt_with_v6_addr(enum enfs_path_state state,
+                                                const char *peer)
+{
+    struct rpc_xprt *x = make_xprt_with_state(state);
+    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&x->addr;
+    sin6->sin6_family = AF_INET6;
+    inet_pton(AF_INET6, peer, &sin6->sin6_addr);
+    return x;
+}
+
+START_TEST(set_state_with_v4_addr_state_change_runs_v4_diag) {
+    struct rpc_xprt *x = make_xprt_with_v4_addr(PM_STATE_INIT, "192.0.2.10");
+    /* Transition forces SUT into the diagnostic-format path. */
+    pm_set_path_state(x, PM_STATE_NORMAL);
+    ck_assert_int_eq(pm_get_path_state(x), PM_STATE_NORMAL);
+} END_TEST
+
+START_TEST(set_state_with_v6_addr_state_change_runs_v6_diag) {
+    struct rpc_xprt *x = make_xprt_with_v6_addr(PM_STATE_INIT, "2001:db8::10");
+    pm_set_path_state(x, PM_STATE_NORMAL);
+    ck_assert_int_eq(pm_get_path_state(x), PM_STATE_NORMAL);
+} END_TEST
+
+START_TEST(set_state_v4_to_fault_runs_diag) {
+    struct rpc_xprt *x = make_xprt_with_v4_addr(PM_STATE_NORMAL, "10.0.0.1");
+    pm_set_path_state(x, PM_STATE_FAULT);
+    ck_assert_int_eq(pm_get_path_state(x), PM_STATE_FAULT);
+} END_TEST
+
+START_TEST(set_state_v6_to_unstable_runs_diag) {
+    struct rpc_xprt *x = make_xprt_with_v6_addr(PM_STATE_NORMAL, "fc00::1");
+    pm_set_path_state(x, PM_STATE_UNSTABLE);
+    ck_assert_int_eq(pm_get_path_state(x), PM_STATE_UNSTABLE);
+} END_TEST
+
+/* All-state transitions for an xprt with a valid peer address. */
+#define DIAG_TRANSITION_TEST(name, family, peer, from, to) \
+    START_TEST(name) { \
+        struct rpc_xprt *x = (family == 4) \
+            ? make_xprt_with_v4_addr((from), (peer)) \
+            : make_xprt_with_v6_addr((from), (peer)); \
+        pm_set_path_state(x, (to)); \
+        ck_assert_int_eq(pm_get_path_state(x), (to)); \
+    } END_TEST
+
+DIAG_TRANSITION_TEST(diag_v4_init_to_normal,    4, "1.2.3.4",   PM_STATE_INIT,    PM_STATE_NORMAL)
+DIAG_TRANSITION_TEST(diag_v4_normal_to_fault,   4, "1.2.3.5",   PM_STATE_NORMAL,  PM_STATE_FAULT)
+DIAG_TRANSITION_TEST(diag_v4_fault_to_normal,   4, "1.2.3.6",   PM_STATE_FAULT,   PM_STATE_NORMAL)
+DIAG_TRANSITION_TEST(diag_v4_normal_to_unstable,4, "1.2.3.7",   PM_STATE_NORMAL,  PM_STATE_UNSTABLE)
+DIAG_TRANSITION_TEST(diag_v4_unstable_to_normal,4, "1.2.3.8",   PM_STATE_UNSTABLE,PM_STATE_NORMAL)
+DIAG_TRANSITION_TEST(diag_v6_init_to_normal,    6, "2001:db8::1", PM_STATE_INIT,    PM_STATE_NORMAL)
+DIAG_TRANSITION_TEST(diag_v6_normal_to_fault,   6, "2001:db8::2", PM_STATE_NORMAL,  PM_STATE_FAULT)
+DIAG_TRANSITION_TEST(diag_v6_fault_to_normal,   6, "2001:db8::3", PM_STATE_FAULT,   PM_STATE_NORMAL)
+DIAG_TRANSITION_TEST(diag_v6_normal_to_unstable,6, "2001:db8::4", PM_STATE_NORMAL,  PM_STATE_UNSTABLE)
+DIAG_TRANSITION_TEST(diag_v6_unstable_to_normal,6, "2001:db8::5", PM_STATE_UNSTABLE,PM_STATE_NORMAL)
+
+/* ============================================================ */
 /* Suite plumbing.                                              */
 /* ============================================================ */
 
@@ -685,6 +761,24 @@ static Suite *pm_state_suite(void)
     tcase_add_test(tcd, path_desc_short_buffer_truncates);
     tcase_add_test(tcd, path_desc_no_ctx_renders_Unknown);
     suite_add_tcase(s, tcd);
+
+    TCase *tcdiag = tcase_create("set_state_diagnostic");
+    tcase_add_checked_fixture(tcdiag, setup, teardown);
+    tcase_add_test(tcdiag, set_state_with_v4_addr_state_change_runs_v4_diag);
+    tcase_add_test(tcdiag, set_state_with_v6_addr_state_change_runs_v6_diag);
+    tcase_add_test(tcdiag, set_state_v4_to_fault_runs_diag);
+    tcase_add_test(tcdiag, set_state_v6_to_unstable_runs_diag);
+    tcase_add_test(tcdiag, diag_v4_init_to_normal);
+    tcase_add_test(tcdiag, diag_v4_normal_to_fault);
+    tcase_add_test(tcdiag, diag_v4_fault_to_normal);
+    tcase_add_test(tcdiag, diag_v4_normal_to_unstable);
+    tcase_add_test(tcdiag, diag_v4_unstable_to_normal);
+    tcase_add_test(tcdiag, diag_v6_init_to_normal);
+    tcase_add_test(tcdiag, diag_v6_normal_to_fault);
+    tcase_add_test(tcdiag, diag_v6_fault_to_normal);
+    tcase_add_test(tcdiag, diag_v6_normal_to_unstable);
+    tcase_add_test(tcdiag, diag_v6_unstable_to_normal);
+    suite_add_tcase(s, tcdiag);
 
     TCase *tcx = tcase_create("xprt_state_desc");
     tcase_add_checked_fixture(tcx, setup, teardown);
