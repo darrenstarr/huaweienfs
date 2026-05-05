@@ -13,9 +13,12 @@
 #include <linux/sunrpc/xprtmultipath.h>
 
 struct rpc_clnt {
-    u32                  cl_vers;   /* RPC program version */
-    int                  cl_enfs;   /* 1 if this client uses enfs multipath */
-    struct rpc_xprt_iter cl_xpi;    /* embedded iterator */
+    u32                  cl_prog;     /* RPC program number (NFS_PROGRAM) */
+    u32                  cl_vers;     /* RPC program version */
+    int                  cl_enfs;     /* 1 if this client uses enfs multipath */
+    struct rpc_xprt_iter cl_xpi;      /* embedded iterator */
+    struct rpc_clnt     *cl_parent;   /* parent for v4 sub-clients */
+    struct rpc_xprt     *cl_xprt;     /* main xprt */
     /* Extend as needed. */
 };
 

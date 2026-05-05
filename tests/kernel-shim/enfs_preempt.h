@@ -71,6 +71,112 @@ static inline bool enfs_is_path_connected(enum enfs_path_state state) {
     return state == PM_STATE_NORMAL || state == PM_STATE_UNSTABLE;
 }
 
+/* From pm_state.h — declarations so SUTs that call these (eg
+ * failover_path.c calls pm_set_path_state) compile. The stubs
+ * provide the implementation. */
+struct rpc_xprt;
+enum enfs_path_state pm_get_path_state(struct rpc_xprt *xprt);
+void pm_set_path_state(struct rpc_xprt *xprt, enum enfs_path_state state);
+void pm_get_path_state_desc(struct rpc_xprt *xprt, char *buf, int len);
+void pm_get_xprt_state_desc(struct rpc_xprt *xprt, char *buf, int len);
+
+/* RPC program numbers — stand-ins for what <linux/nfs.h> et al would
+ * provide. Preempted include guards prevent the real headers from
+ * defining these. */
+#ifndef NFS_PROGRAM
+#define NFS_PROGRAM     100003
+#endif
+#ifndef NFS3_VERSION
+#define NFS3_VERSION    3
+#endif
+#ifndef NFS4_MINOR_VERSION
+#define NFS4_MINOR_VERSION 0
+#endif
+
+/* NFSv4 client-side procedure stat indices, used by
+ * failover_path.c's switch statement. Real values in
+ * <linux/nfs4.h> (preempted). */
+enum {
+    NFSPROC4_CLNT_NULL = 0,
+    NFSPROC4_CLNT_READ,
+    NFSPROC4_CLNT_WRITE,
+    NFSPROC4_CLNT_COMMIT,
+    NFSPROC4_CLNT_OPEN,
+    NFSPROC4_CLNT_OPEN_CONFIRM,
+    NFSPROC4_CLNT_OPEN_NOATTR,
+    NFSPROC4_CLNT_OPEN_DOWNGRADE,
+    NFSPROC4_CLNT_CLOSE,
+    NFSPROC4_CLNT_SETATTR,
+    NFSPROC4_CLNT_FSINFO,
+    NFSPROC4_CLNT_RENEW,
+    NFSPROC4_CLNT_SETCLIENTID,
+    NFSPROC4_CLNT_SETCLIENTID_CONFIRM,
+    NFSPROC4_CLNT_LOCK,
+    NFSPROC4_CLNT_LOCKT,
+    NFSPROC4_CLNT_LOCKU,
+    NFSPROC4_CLNT_ACCESS,
+    NFSPROC4_CLNT_GETATTR,
+    NFSPROC4_CLNT_LOOKUP,
+    NFSPROC4_CLNT_LOOKUP_ROOT,
+    NFSPROC4_CLNT_REMOVE,
+    NFSPROC4_CLNT_RENAME,
+    NFSPROC4_CLNT_LINK,
+    NFSPROC4_CLNT_SYMLINK,
+    NFSPROC4_CLNT_CREATE,
+    NFSPROC4_CLNT_PATHCONF,
+    NFSPROC4_CLNT_STATFS,
+    NFSPROC4_CLNT_READLINK,
+    NFSPROC4_CLNT_READDIR,
+    NFSPROC4_CLNT_SERVER_CAPS,
+    NFSPROC4_CLNT_DELEGRETURN,
+    NFSPROC4_CLNT_GETACL,
+    NFSPROC4_CLNT_SETACL,
+};
+
+/* NFSv3 procedure numbers — wire values from RFC 1813. Real values
+ * in <linux/nfs3.h> (preempted). */
+#define NFS3PROC_NULL         0
+#define NFS3PROC_GETATTR      1
+#define NFS3PROC_SETATTR      2
+#define NFS3PROC_LOOKUP       3
+#define NFS3PROC_ACCESS       4
+#define NFS3PROC_READLINK     5
+#define NFS3PROC_READ         6
+#define NFS3PROC_WRITE        7
+#define NFS3PROC_CREATE       8
+#define NFS3PROC_MKDIR        9
+#define NFS3PROC_SYMLINK      10
+#define NFS3PROC_MKNOD        11
+#define NFS3PROC_REMOVE       12
+#define NFS3PROC_RMDIR        13
+#define NFS3PROC_RENAME       14
+#define NFS3PROC_LINK         15
+#define NFS3PROC_READDIR      16
+#define NFS3PROC_READDIRPLUS  17
+#define NFS3PROC_FSSTAT       18
+#define NFS3PROC_FSINFO       19
+#define NFS3PROC_PATHCONF     20
+#define NFS3PROC_COMMIT       21
+
+/* enfs config knobs that the SUT switches on. */
+#ifndef ENFS_MULTIPATH_ENABLE
+#define ENFS_MULTIPATH_ENABLE 1
+#endif
+
+/* Misc kernel constants used by failover_path.c's delay path. */
+#ifndef HZ
+#define HZ 1000UL
+#endif
+#ifndef MSEC_PER_SEC
+#define MSEC_PER_SEC 1000UL
+#endif
+#ifndef ETIMEDOUT
+#define ETIMEDOUT 110
+#endif
+#ifndef NFS3_OK
+#define NFS3_OK 0
+#endif
+
 /* Forward decl for things below */
 struct rpc_xprt;
 struct rpc_clnt;

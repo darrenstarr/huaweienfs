@@ -94,7 +94,7 @@ LDLIBS := $(CHECK_LIBS) -lpthread
 # ---------------------------------------------------------------------
 
 TESTS := test_enfs_roundrobin test_enfs_multipath_parse test_loadbalance_simulator \
-         test_pm_state
+         test_pm_state test_failover_path
 
 ENFS_SRC_test_enfs_roundrobin := $(ENFS_SRC_ROOT)/enfs_roundrobin.c
 STUBS_test_enfs_roundrobin    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/enfs_deps_stubs.c
@@ -114,6 +114,12 @@ ENFS_SRC_test_pm_state := $(ENFS_SRC_ROOT)/pm_state.c
 # Use a pm_state-specific stub set: the standard enfs_deps_stubs.c
 # defines pm_get_path_state which would collide with the SUT.
 STUBS_test_pm_state    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/pm_state_stubs.c
+
+# failover_path: per-procedure retry policy for v3 + v4. Static
+# functions exposed via -Dstatic=. Stubs out the few enfs-internal
+# helpers it calls (pm_ping_is_test_xprt_task, enfs_get_config_*).
+ENFS_SRC_test_failover_path := $(ENFS_SRC_ROOT)/failover_path.c
+STUBS_test_failover_path    := $(STUBS_DIR)/kernel_stubs.c $(STUBS_DIR)/failover_path_stubs.c
 
 # Address-list parser. Covers BOTH IPv4 (the production target for
 # customer storage) and IPv6 (the project lab fabric). Uses libc-
