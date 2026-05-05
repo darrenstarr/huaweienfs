@@ -1240,6 +1240,77 @@ START_TEST(wraparound_at_N_128) {
 }
 END_TEST
 
+/* Per-N wraparound parametric — verify the full-rotation invariant
+ * holds for many N values, not just the 64/128 above. */
+#define WRAPAROUND_N(name, n) \
+    START_TEST(name) { \
+        const int N = (n); \
+        struct rpc_xprt_switch *xps = make_xps(); \
+        struct rpc_xprt **xs = calloc(N, sizeof(*xs)); \
+        for (int i = 0; i < N; i++) { \
+            xs[i] = make_xprt(0, i == 0, PM_STATE_NORMAL); \
+            xps_add(xps, xs[i]); \
+        } \
+        struct rpc_xprt *cur = NULL; \
+        for (int i = 0; i < N; i++) \
+            cur = enfs_lb_find_next_entry_roundrobin(xps, cur); \
+        ck_assert_ptr_eq( \
+            enfs_lb_find_next_entry_roundrobin(xps, cur), xs[0]); \
+        free(xs); \
+    } END_TEST
+
+WRAPAROUND_N(wrap_n_2,    2)
+WRAPAROUND_N(wrap_n_3,    3)
+WRAPAROUND_N(wrap_n_5,    5)
+WRAPAROUND_N(wrap_n_7,    7)
+WRAPAROUND_N(wrap_n_11,   11)
+WRAPAROUND_N(wrap_n_13,   13)
+WRAPAROUND_N(wrap_n_17,   17)
+WRAPAROUND_N(wrap_n_19,   19)
+WRAPAROUND_N(wrap_n_23,   23)
+WRAPAROUND_N(wrap_n_31,   31)
+WRAPAROUND_N(wrap_n_37,   37)
+WRAPAROUND_N(wrap_n_50,   50)
+WRAPAROUND_N(wrap_n_75,   75)
+WRAPAROUND_N(wrap_n_99,   99)
+WRAPAROUND_N(wrap_n_100,  100)
+WRAPAROUND_N(wrap_n_127,  127)
+WRAPAROUND_N(wrap_n_200,  200)
+WRAPAROUND_N(wrap_n_250,  250)
+
+/* Multi-rotation: walk K full rotations, verify position after K*N
+ * calls equals position after 0 calls (modulo wrap). */
+#define MULTI_ROTATION(name, n, k) \
+    START_TEST(name) { \
+        const int N = (n); \
+        const int K = (k); \
+        struct rpc_xprt_switch *xps = make_xps(); \
+        struct rpc_xprt **xs = calloc(N, sizeof(*xs)); \
+        for (int i = 0; i < N; i++) { \
+            xs[i] = make_xprt(0, i == 0, PM_STATE_NORMAL); \
+            xps_add(xps, xs[i]); \
+        } \
+        struct rpc_xprt *cur = NULL; \
+        for (int i = 0; i < K * N; i++) \
+            cur = enfs_lb_find_next_entry_roundrobin(xps, cur); \
+        /* After K*N calls, cur is the last xprt of the K'th rotation, \
+         * so the next call wraps to xs[0]. */ \
+        ck_assert_ptr_eq( \
+            enfs_lb_find_next_entry_roundrobin(xps, cur), xs[0]); \
+        free(xs); \
+    } END_TEST
+
+MULTI_ROTATION(multi_rot_8_5,    8,   5)
+MULTI_ROTATION(multi_rot_8_10,   8,  10)
+MULTI_ROTATION(multi_rot_8_50,   8,  50)
+MULTI_ROTATION(multi_rot_16_5,  16,   5)
+MULTI_ROTATION(multi_rot_16_10, 16,  10)
+MULTI_ROTATION(multi_rot_16_25, 16,  25)
+MULTI_ROTATION(multi_rot_32_5,  32,   5)
+MULTI_ROTATION(multi_rot_32_10, 32,  10)
+MULTI_ROTATION(multi_rot_64_5,  64,   5)
+MULTI_ROTATION(multi_rot_128_3,128,   3)
+
 /* ============================================================ */
 /* Mid-walk state mutation.                                      */
 /* ============================================================ */
@@ -1380,6 +1451,44 @@ Suite *roundrobin_stress_suite_install(Suite *s)
     tcase_add_test(tc_mut, mid_walk_kill_next_xprt_skips_it);
     tcase_add_test(tc_mut, mid_walk_resurrect_dead_xprt_includes_it);
     suite_add_tcase(s, tc_mut);
+
+    /* Per-N wraparound parametric. */
+    TCase *tc_wn = tcase_create("wraparound_per_N");
+    tcase_add_checked_fixture(tc_wn, setup, teardown);
+    tcase_add_test(tc_wn, wrap_n_2);
+    tcase_add_test(tc_wn, wrap_n_3);
+    tcase_add_test(tc_wn, wrap_n_5);
+    tcase_add_test(tc_wn, wrap_n_7);
+    tcase_add_test(tc_wn, wrap_n_11);
+    tcase_add_test(tc_wn, wrap_n_13);
+    tcase_add_test(tc_wn, wrap_n_17);
+    tcase_add_test(tc_wn, wrap_n_19);
+    tcase_add_test(tc_wn, wrap_n_23);
+    tcase_add_test(tc_wn, wrap_n_31);
+    tcase_add_test(tc_wn, wrap_n_37);
+    tcase_add_test(tc_wn, wrap_n_50);
+    tcase_add_test(tc_wn, wrap_n_75);
+    tcase_add_test(tc_wn, wrap_n_99);
+    tcase_add_test(tc_wn, wrap_n_100);
+    tcase_add_test(tc_wn, wrap_n_127);
+    tcase_add_test(tc_wn, wrap_n_200);
+    tcase_add_test(tc_wn, wrap_n_250);
+    suite_add_tcase(s, tc_wn);
+
+    /* Multi-rotation tests. */
+    TCase *tc_mr = tcase_create("multi_rotation");
+    tcase_add_checked_fixture(tc_mr, setup, teardown);
+    tcase_add_test(tc_mr, multi_rot_8_5);
+    tcase_add_test(tc_mr, multi_rot_8_10);
+    tcase_add_test(tc_mr, multi_rot_8_50);
+    tcase_add_test(tc_mr, multi_rot_16_5);
+    tcase_add_test(tc_mr, multi_rot_16_10);
+    tcase_add_test(tc_mr, multi_rot_16_25);
+    tcase_add_test(tc_mr, multi_rot_32_5);
+    tcase_add_test(tc_mr, multi_rot_32_10);
+    tcase_add_test(tc_mr, multi_rot_64_5);
+    tcase_add_test(tc_mr, multi_rot_128_3);
+    suite_add_tcase(s, tc_mr);
 
     return s;
 }
