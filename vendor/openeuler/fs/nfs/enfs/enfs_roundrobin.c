@@ -15,6 +15,7 @@
 
 #include "enfs.h"
 #include "enfs_config.h"
+#include "enfs_multipath.h"
 #include "pm_state.h"
 #include "enfs_proc.h"
 
@@ -229,7 +230,8 @@ static void enfs_lb_switch_set_roundrobin(struct rpc_clnt *clnt)
 	if (xps == NULL || xps->xps_nxprts == 0)
 		return;
 
-	if (clnt->cl_vers == 3) {
+	if (clnt->cl_vers == 3 ||
+	    (clnt->cl_vers == 4 && enfs_v4_rr_enabled())) {
 		if (READ_ONCE(xps->xps_iter_ops) !=
 		    &enfs_xprt_iter_roundrobin) {
 			WRITE_ONCE(xps->xps_iter_ops,

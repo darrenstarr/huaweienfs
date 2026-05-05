@@ -66,6 +66,28 @@ static int link_count;
 static spinlock_t mount_count_lock;
 static int mount_count;
 
+/*
+ * EXPERIMENTAL: extend round-robin multipath dispatch to NFSv4 mounts.
+ *
+ * NFSv4.1 sessions are spec'd to bind to a single connection unless
+ * BIND_CONN_TO_SESSION is performed. Naively round-robining v4.1 RPCs
+ * across multiple xprts may corrupt session state on servers that
+ * strictly enforce slot/sequence ownership per connection. Default off.
+ * Validate against your server with cross-host SHA-256 verify before
+ * enabling in production. See docs/internals/14-blocksize-and-integrity.md.
+ */
+static bool enfs_v4_rr;
+module_param(enfs_v4_rr, bool, 0644);
+MODULE_PARM_DESC(enfs_v4_rr,
+		 "Enable round-robin multipath dispatch on NFSv4 mounts. "
+		 "EXPERIMENTAL — may corrupt v4.1 session state without "
+		 "BIND_CONN_TO_SESSION. Default off.");
+
+bool enfs_v4_rr_enabled(void)
+{
+	return READ_ONCE(enfs_v4_rr);
+}
+
 bool enfs_link_count_add(int num)
 {
 	bool ret = false;
@@ -922,7 +944,12 @@ void enfs_create_multi_xprt(struct rpc_create_args *args, struct rpc_clnt *clnt)
 	struct rpc_create_args *cargs = NULL;
 	int err = 0;
 
-	if (args->version == 4)
+	/*
+	 * NFSv4 mounts only build the multipath transport list when the
+	 * experimental enfs_v4_rr module param is on. See its
+	 * MODULE_PARM_DESC for the corruption risk this opts into.
+	 */
+	if (args->version == 4 && !enfs_v4_rr_enabled())
 		return;
 
 	enfs_log_info("%p\n", clnt);

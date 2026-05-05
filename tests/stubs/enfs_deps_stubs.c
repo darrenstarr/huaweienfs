@@ -164,6 +164,18 @@ int32_t enfs_get_native_link_io_status(void)
     return stub_native_link_io_status;
 }
 
+/* ------------- enfs_v4_rr_enabled -------------------------------
+ * Backs the experimental NFSv4 round-robin module param. Default
+ * false matches production. Tests that want to exercise the v4 RR
+ * path flip this before invoking enfs_lb_set_policy. */
+
+bool stub_v4_rr_enabled = false;
+
+bool enfs_v4_rr_enabled(void)
+{
+    return stub_v4_rr_enabled;
+}
+
 /* ------------- enfs_iter_rpc_clnt -------------------------------
  * Production walks a registered clnt list. Tests don't currently
  * exercise enfs_lb_init / enfs_lb_exit; the stub records that it
@@ -205,6 +217,7 @@ void stub_reset_all(void)
     stub_path_state_table_reset();
     stub_multipath_state        = 0;
     stub_native_link_io_status  = 1;
+    stub_v4_rr_enabled          = false;
     stub_iter_rpc_clnt_calls    = 0;
     stub_set_singular_calls     = 0;
     stub_set_roundrobin_calls   = 0;
