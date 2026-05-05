@@ -1127,6 +1127,151 @@ START_TEST(kref_zero_means_ineligible_at_position_last)
 }
 END_TEST
 
+/* ============================================================ */
+/* Boundary tests: cursor at non-existent xprt (RCU-removed).   */
+/* ============================================================ */
+
+START_TEST(cur_pointer_not_in_list_returns_first_eligible)
+{
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *a = make_xprt(0, false, PM_STATE_NORMAL);
+    struct rpc_xprt *b = make_xprt(0, false, PM_STATE_NORMAL);
+    struct rpc_xprt *outsider = make_xprt(0, false, PM_STATE_NORMAL);
+    xps_add(xps, a); xps_add(xps, b);
+    /* outsider is NOT in the list — cursor pointing there shouldn't
+     * make us return NULL forever; we wrap to the first eligible. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, outsider), a);
+}
+END_TEST
+
+START_TEST(cur_NULL_with_main_returns_main_when_native_up)
+{
+    stub_native_link_io_status = 1;
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *m = make_xprt(0, true, PM_STATE_NORMAL);
+    struct rpc_xprt *n = make_xprt(0, false, PM_STATE_NORMAL);
+    xps_add(xps, m); xps_add(xps, n);
+    /* native up + main eligible: cursor=NULL returns the first xprt
+     * in iteration order (m). */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), m);
+}
+END_TEST
+
+START_TEST(cur_NULL_with_main_returns_non_main_when_native_down)
+{
+    stub_native_link_io_status = 0;
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *m = make_xprt(0, true, PM_STATE_NORMAL);
+    struct rpc_xprt *n = make_xprt(0, false, PM_STATE_NORMAL);
+    xps_add(xps, m); xps_add(xps, n);
+    /* native down: main is skipped, first eligible is n. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, NULL), n);
+}
+END_TEST
+
+/* ============================================================ */
+/* Single eligible amongst many dead xprts.                     */
+/* ============================================================ */
+
+#define ONE_LIVE_AT_POS(name, pos, total) \
+    START_TEST(name) { \
+        struct rpc_xprt_switch *xps = make_xps(); \
+        struct rpc_xprt *live = NULL; \
+        for (unsigned int i = 0; i < (total); i++) { \
+            struct rpc_xprt *x = make_xprt(0, false, \
+                (i == (pos)) ? PM_STATE_NORMAL : PM_STATE_FAULT); \
+            xps_add(xps, x); \
+            if (i == (pos)) live = x; \
+        } \
+        ck_assert_ptr_eq( \
+            enfs_lb_find_next_entry_roundrobin(xps, NULL), live); \
+        ck_assert_ptr_eq( \
+            enfs_lb_find_next_entry_roundrobin(xps, live), live); \
+    } END_TEST
+
+ONE_LIVE_AT_POS(one_live_at_0_of_8,  0, 8)
+ONE_LIVE_AT_POS(one_live_at_1_of_8,  1, 8)
+ONE_LIVE_AT_POS(one_live_at_2_of_8,  2, 8)
+ONE_LIVE_AT_POS(one_live_at_3_of_8,  3, 8)
+ONE_LIVE_AT_POS(one_live_at_4_of_8,  4, 8)
+ONE_LIVE_AT_POS(one_live_at_5_of_8,  5, 8)
+ONE_LIVE_AT_POS(one_live_at_6_of_8,  6, 8)
+ONE_LIVE_AT_POS(one_live_at_7_of_8,  7, 8)
+ONE_LIVE_AT_POS(one_live_at_0_of_16, 0, 16)
+ONE_LIVE_AT_POS(one_live_at_8_of_16, 8, 16)
+ONE_LIVE_AT_POS(one_live_at_15_of_16,15,16)
+ONE_LIVE_AT_POS(one_live_at_0_of_32, 0, 32)
+ONE_LIVE_AT_POS(one_live_at_16_of_32,16,32)
+ONE_LIVE_AT_POS(one_live_at_31_of_32,31,32)
+
+/* ============================================================ */
+/* Wrap-around correctness at high N.                           */
+/* ============================================================ */
+
+START_TEST(wraparound_at_N_64) {
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *xs[64];
+    for (int i = 0; i < 64; i++) {
+        xs[i] = make_xprt(0, /*main*/i == 0, PM_STATE_NORMAL);
+        xps_add(xps, xs[i]);
+    }
+    /* Walk one full rotation to land back at xs[0]. */
+    struct rpc_xprt *cur = NULL;
+    for (int i = 0; i < 64; i++)
+        cur = enfs_lb_find_next_entry_roundrobin(xps, cur);
+    /* Next call should wrap to xs[0]. */
+    ck_assert_ptr_eq(
+        enfs_lb_find_next_entry_roundrobin(xps, cur), xs[0]);
+}
+END_TEST
+
+START_TEST(wraparound_at_N_128) {
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *xs[128];
+    for (int i = 0; i < 128; i++) {
+        xs[i] = make_xprt(0, /*main*/i == 0, PM_STATE_NORMAL);
+        xps_add(xps, xs[i]);
+    }
+    struct rpc_xprt *cur = NULL;
+    for (int i = 0; i < 128; i++)
+        cur = enfs_lb_find_next_entry_roundrobin(xps, cur);
+    ck_assert_ptr_eq(
+        enfs_lb_find_next_entry_roundrobin(xps, cur), xs[0]);
+}
+END_TEST
+
+/* ============================================================ */
+/* Mid-walk state mutation.                                      */
+/* ============================================================ */
+
+START_TEST(mid_walk_kill_next_xprt_skips_it) {
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *a = make_xprt(0, false, PM_STATE_NORMAL);
+    struct rpc_xprt *b = make_xprt(0, false, PM_STATE_NORMAL);
+    struct rpc_xprt *c = make_xprt(0, false, PM_STATE_NORMAL);
+    xps_add(xps, a); xps_add(xps, b); xps_add(xps, c);
+    /* From a, next is b. */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, a), b);
+    /* Kill b. From a, next eligible is c. */
+    stub_set_path_state(b, PM_STATE_FAULT);
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, a), c);
+}
+END_TEST
+
+START_TEST(mid_walk_resurrect_dead_xprt_includes_it) {
+    struct rpc_xprt_switch *xps = make_xps();
+    struct rpc_xprt *a = make_xprt(0, false, PM_STATE_NORMAL);
+    struct rpc_xprt *b = make_xprt(0, false, PM_STATE_FAULT);
+    struct rpc_xprt *c = make_xprt(0, false, PM_STATE_NORMAL);
+    xps_add(xps, a); xps_add(xps, b); xps_add(xps, c);
+    /* From a, next eligible is c (b dead). */
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, a), c);
+    /* Resurrect b. From a, next is now b. */
+    stub_set_path_state(b, PM_STATE_NORMAL);
+    ck_assert_ptr_eq(enfs_lb_find_next_entry_roundrobin(xps, a), b);
+}
+END_TEST
+
 /* ================================================================ */
 /* The stress installer simply registers everything with the suite. */
 /* ================================================================ */
@@ -1199,6 +1344,42 @@ Suite *roundrobin_stress_suite_install(Suite *s)
     tcase_add_test(tc_kref, kref_zero_means_ineligible_at_position_0);
     tcase_add_test(tc_kref, kref_zero_means_ineligible_at_position_last);
     suite_add_tcase(s, tc_kref);
+
+    /* Cursor edge cases. */
+    TCase *tc_ced = tcase_create("cursor_edges");
+    tcase_add_checked_fixture(tc_ced, setup, teardown);
+    tcase_add_test(tc_ced, cur_pointer_not_in_list_returns_first_eligible);
+    tcase_add_test(tc_ced, cur_NULL_with_main_returns_main_when_native_up);
+    tcase_add_test(tc_ced, cur_NULL_with_main_returns_non_main_when_native_down);
+    suite_add_tcase(s, tc_ced);
+
+    /* One-survivor at every position. */
+    TCase *tc_solo = tcase_create("one_live_at_position");
+    tcase_add_checked_fixture(tc_solo, setup, teardown);
+    tcase_add_test(tc_solo, one_live_at_0_of_8);
+    tcase_add_test(tc_solo, one_live_at_1_of_8);
+    tcase_add_test(tc_solo, one_live_at_2_of_8);
+    tcase_add_test(tc_solo, one_live_at_3_of_8);
+    tcase_add_test(tc_solo, one_live_at_4_of_8);
+    tcase_add_test(tc_solo, one_live_at_5_of_8);
+    tcase_add_test(tc_solo, one_live_at_6_of_8);
+    tcase_add_test(tc_solo, one_live_at_7_of_8);
+    tcase_add_test(tc_solo, one_live_at_0_of_16);
+    tcase_add_test(tc_solo, one_live_at_8_of_16);
+    tcase_add_test(tc_solo, one_live_at_15_of_16);
+    tcase_add_test(tc_solo, one_live_at_0_of_32);
+    tcase_add_test(tc_solo, one_live_at_16_of_32);
+    tcase_add_test(tc_solo, one_live_at_31_of_32);
+    suite_add_tcase(s, tc_solo);
+
+    /* Wraparound + mid-walk mutation. */
+    TCase *tc_mut = tcase_create("dynamic_state");
+    tcase_add_checked_fixture(tc_mut, setup, teardown);
+    tcase_add_test(tc_mut, wraparound_at_N_64);
+    tcase_add_test(tc_mut, wraparound_at_N_128);
+    tcase_add_test(tc_mut, mid_walk_kill_next_xprt_skips_it);
+    tcase_add_test(tc_mut, mid_walk_resurrect_dead_xprt_includes_it);
+    suite_add_tcase(s, tc_mut);
 
     return s;
 }
