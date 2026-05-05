@@ -271,6 +271,122 @@ START_TEST(stress_alloc_use_field_free) {
 } END_TEST
 
 /* ============================================================ */
+/* Parametric scaling: per-N alloc-then-free patterns.          */
+/* ============================================================ */
+
+#define ALLOC_FREE_N_TEST(name, n) \
+    START_TEST(name) { \
+        const int N = (n); \
+        struct rpc_xprt **xs = calloc(N, sizeof(*xs)); \
+        for (int i = 0; i < N; i++) { \
+            xs[i] = make_xprt_bare(); \
+            ck_assert_int_eq(enfs_alloc_xprt_ctx(xs[i]), 0); \
+        } \
+        for (int i = 0; i < N; i++) \
+            ck_assert_ptr_nonnull(xprt_get_reserve_context(xs[i])); \
+        for (int i = 0; i < N; i++) { \
+            enfs_free_xprt_ctx(xs[i]); \
+            ck_assert_ptr_null(xprt_get_reserve_context(xs[i])); \
+        } \
+        free(xs); \
+    } END_TEST
+
+ALLOC_FREE_N_TEST(alloc_free_n_1,    1)
+ALLOC_FREE_N_TEST(alloc_free_n_2,    2)
+ALLOC_FREE_N_TEST(alloc_free_n_3,    3)
+ALLOC_FREE_N_TEST(alloc_free_n_4,    4)
+ALLOC_FREE_N_TEST(alloc_free_n_5,    5)
+ALLOC_FREE_N_TEST(alloc_free_n_8,    8)
+ALLOC_FREE_N_TEST(alloc_free_n_16,   16)
+ALLOC_FREE_N_TEST(alloc_free_n_32,   32)
+ALLOC_FREE_N_TEST(alloc_free_n_50,   50)
+ALLOC_FREE_N_TEST(alloc_free_n_75,   75)
+ALLOC_FREE_N_TEST(alloc_free_n_100,  100)
+ALLOC_FREE_N_TEST(alloc_free_n_128,  128)
+ALLOC_FREE_N_TEST(alloc_free_n_200,  200)
+ALLOC_FREE_N_TEST(alloc_free_n_256,  256)
+
+/* Per-N: write distinct values to each ctx, verify each one keeps
+ * its independent value (no aliasing). */
+#define DISTINCT_VALUES_N_TEST(name, n) \
+    START_TEST(name) { \
+        const int N = (n); \
+        struct rpc_xprt **xs = calloc(N, sizeof(*xs)); \
+        for (int i = 0; i < N; i++) { \
+            xs[i] = make_xprt_bare(); \
+            enfs_alloc_xprt_ctx(xs[i]); \
+            struct enfs_xprt_context *c = xprt_get_reserve_context(xs[i]); \
+            atomic_long_set(&c->queuelen, (long)(1000 + i)); \
+        } \
+        for (int i = 0; i < N; i++) { \
+            struct enfs_xprt_context *c = xprt_get_reserve_context(xs[i]); \
+            ck_assert_int_eq(atomic_long_read(&c->queuelen), 1000 + i); \
+        } \
+        for (int i = 0; i < N; i++) enfs_free_xprt_ctx(xs[i]); \
+        free(xs); \
+    } END_TEST
+
+DISTINCT_VALUES_N_TEST(distinct_values_n_8,   8)
+DISTINCT_VALUES_N_TEST(distinct_values_n_16,  16)
+DISTINCT_VALUES_N_TEST(distinct_values_n_32,  32)
+DISTINCT_VALUES_N_TEST(distinct_values_n_64,  64)
+DISTINCT_VALUES_N_TEST(distinct_values_n_128, 128)
+
+/* Stress: alloc, free in random-ish (mod-7) order. */
+START_TEST(stress_alloc_then_free_modular_order) {
+    const int N = 64;
+    struct rpc_xprt *xs[N];
+    for (int i = 0; i < N; i++) {
+        xs[i] = make_xprt_bare();
+        enfs_alloc_xprt_ctx(xs[i]);
+    }
+    /* Free in mod-7 order to mix things up. */
+    bool freed[64] = {0};
+    int count = 0;
+    int idx = 0;
+    while (count < N) {
+        if (!freed[idx]) {
+            enfs_free_xprt_ctx(xs[idx]);
+            ck_assert_ptr_null(xprt_get_reserve_context(xs[idx]));
+            freed[idx] = true;
+            count++;
+        }
+        idx = (idx + 7) % N;
+    }
+} END_TEST
+
+/* Realloc on already-allocated xprt: should overwrite (or at
+ * least not leak). The SUT doesn't check existing — it just
+ * overwrites the reserve slot. */
+START_TEST(realloc_on_existing_overwrites_slot) {
+    struct rpc_xprt *x = make_xprt_bare();
+    enfs_alloc_xprt_ctx(x);
+    void *first = xprt_get_reserve_context(x);
+    /* Capture the leaked first ctx so the test doesn't show as
+     * leaking — this DOES leak in the SUT, but it's a known
+     * "caller must not double-alloc" contract. We free the second
+     * via the SUT; we drop the first via free(). */
+    enfs_alloc_xprt_ctx(x);
+    void *second = xprt_get_reserve_context(x);
+    ck_assert_ptr_nonnull(first);
+    ck_assert_ptr_nonnull(second);
+    ck_assert_ptr_ne(first, second);
+    free(first);  /* recover the leaked ctx */
+    enfs_free_xprt_ctx(x);
+} END_TEST
+
+/* Free → alloc → free → alloc: 4-step churn cycle, repeated. */
+START_TEST(churn_cycle_400_iterations) {
+    struct rpc_xprt *x = make_xprt_bare();
+    for (int i = 0; i < 100; i++) {
+        ck_assert_int_eq(enfs_alloc_xprt_ctx(x), 0);
+        enfs_free_xprt_ctx(x);
+        ck_assert_int_eq(enfs_alloc_xprt_ctx(x), 0);
+        enfs_free_xprt_ctx(x);
+    }
+} END_TEST
+
+/* ============================================================ */
 /* Suite plumbing.                                              */
 /* ============================================================ */
 
@@ -316,7 +432,44 @@ static Suite *enfs_path_suite(void)
     tcase_add_test(tcs, stress_alloc_free_alloc_free_100_xprts);
     tcase_add_test(tcs, stress_interleaved_alloc_free_pattern);
     tcase_add_test(tcs, stress_alloc_use_field_free);
+    tcase_add_test(tcs, stress_alloc_then_free_modular_order);
+    tcase_add_test(tcs, churn_cycle_400_iterations);
     suite_add_tcase(s, tcs);
+
+    /* Per-N alloc/free patterns. */
+    TCase *tcn = tcase_create("alloc_free_per_N");
+    tcase_add_checked_fixture(tcn, setup, teardown);
+    tcase_add_test(tcn, alloc_free_n_1);
+    tcase_add_test(tcn, alloc_free_n_2);
+    tcase_add_test(tcn, alloc_free_n_3);
+    tcase_add_test(tcn, alloc_free_n_4);
+    tcase_add_test(tcn, alloc_free_n_5);
+    tcase_add_test(tcn, alloc_free_n_8);
+    tcase_add_test(tcn, alloc_free_n_16);
+    tcase_add_test(tcn, alloc_free_n_32);
+    tcase_add_test(tcn, alloc_free_n_50);
+    tcase_add_test(tcn, alloc_free_n_75);
+    tcase_add_test(tcn, alloc_free_n_100);
+    tcase_add_test(tcn, alloc_free_n_128);
+    tcase_add_test(tcn, alloc_free_n_200);
+    tcase_add_test(tcn, alloc_free_n_256);
+    suite_add_tcase(s, tcn);
+
+    /* Distinct-value preservation across N ctxs. */
+    TCase *tcdv = tcase_create("distinct_values");
+    tcase_add_checked_fixture(tcdv, setup, teardown);
+    tcase_add_test(tcdv, distinct_values_n_8);
+    tcase_add_test(tcdv, distinct_values_n_16);
+    tcase_add_test(tcdv, distinct_values_n_32);
+    tcase_add_test(tcdv, distinct_values_n_64);
+    tcase_add_test(tcdv, distinct_values_n_128);
+    suite_add_tcase(s, tcdv);
+
+    /* Re-alloc edge case. */
+    TCase *tcr = tcase_create("realloc");
+    tcase_add_checked_fixture(tcr, setup, teardown);
+    tcase_add_test(tcr, realloc_on_existing_overwrites_slot);
+    suite_add_tcase(s, tcr);
 
     return s;
 }
